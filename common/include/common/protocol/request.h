@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: MIT OR GPL-2.0-only
+// SPDX-FileCopyrightText: 2026 Jarosław Bielski <bielski.j@gmail.com>
+
+#ifndef COMMON_PROTOCOL_REQUEST_H_
+#define COMMON_PROTOCOL_REQUEST_H_
+
+#include "common/types.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct _ProtoReqGetInfo {
+
+} ProtoReqGetInfo;
+
+typedef struct _ProtoReqI2CTransfer {
+	uint8_t  flags;
+	uint8_t  slaveAddress;
+
+	uint8_t *data;
+	uint16_t dataSize;
+} ProtoReqI2CTransfer;
+
+typedef struct _ProtoReq {
+	uint8_t cmd;
+
+	union {
+		ProtoReqGetInfo     getInfo;
+		ProtoReqI2CTransfer i2cTransfer;
+	} request;
+} ProtoReq;
+
+void     proto_req_init  (ProtoReq *request, void *memory, uint16_t memorySize, uint8_t cmd);
+void     proto_req_assign(ProtoReq *request, void *memory, uint16_t memorySize);
+uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize);
+bool     proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* COMMON_PROTOCOL_REQUEST_H_ */
