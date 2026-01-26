@@ -3,6 +3,7 @@
 
 #include <linux/module.h>
 #include <linux/i2c.h>
+#include <linux/w1.h>
 #include <linux/tty.h>
 #include <linux/completion.h>
 #include <linux/wait.h>
@@ -101,7 +102,8 @@ typedef struct _UbusUart {
     UbusCmd *pendingCmd;
     bool     hwDetected;
 
-    struct i2c_adapter i2cAdapter;
+    struct i2c_adapter   i2cAdapter;
+    struct w1_bus_master w1Master;
 } UbusUart;
 
 static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
@@ -205,18 +207,59 @@ static int cmd_wait(UbusCmd *cmd) {
     return 0;
 }
 
+static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1_slave_found_callback callback) {
+    UBUS_TRACE(("[W1]: Search type: %02x", searchType));
+}
+
+static u8 _w1ResetBus(void *devData) {
+    UbusUart *ubus = (UbusUart *) devData;
+
+    UBUS_TRACE(("[W1]: reseting bus"));
+
+    //  return -1=Error, 0=Device present, 1=No device present
+    return 1;
+}
+
+static u8 _w1ReadByte(void *devData) {
+    UbusUart *ubus = (UbusUart *) devData;
+
+    UBUS_TRACE(("[W1]: Reading single byte"));
+
+    return 0;
+}
+
+static void _w1WriteByte(void *devData, u8 byte) {
+    UbusUart *ubus = (UbusUart *) devData;
+
+    UBUS_TRACE(("[W1]: Writing single byte %02x", byte));
+}
+
+static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
+    UbusUart *ubus = (UbusUart *) devData;
+
+    UBUS_TRACE(("[W1]: Writing block of length %d", bufferLength));
+}
+
+static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
+    UbusUart *ubus = (UbusUart *) devData;
+
+    UBUS_TRACE(("[W1]: Reading block of length %d", bufferLength));
+
+    return 0;
+}
+
 static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
     int ret = 0;
 
     {
         UbusUart *ubus = (UbusUart *) adap->algo_data;
 
-        UBUS_DBG(("Requested transfer of %d I2C messages", num));
+        UBUS_DBG(("[I2C] Requested transfer of %d I2C messages", num));
 
         for (int msgIndex = 0; msgIndex < num; msgIndex++) {
             struct i2c_msg *msg = &msgs[msgIndex];
 
-            UBUS_DBG(("Transfering message %d of %d, slave: %x, data length: %u, flags: %02x", msgIndex + 1, num, msg->addr, msg->len, msg->flags));
+            UBUS_DBG(("[I2C] Transfering message %d of %d, slave: %x, data length: %u, flags: %02x", msgIndex + 1, num, msg->addr, msg->len, msg->flags));
 
             size_t written = 0;
 
@@ -278,7 +321,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
                         }
                     }
 
-                    UBUS_DBG(("Scheduling transfer command START/REP: %d/%d, STOP: %d, READ: %d, CONT: %d, len: %u", 
+                    UBUS_DBG(("[I2C] Scheduling transfer command START/REP: %d/%d, STOP: %d, READ: %d, CONT: %d, len: %u", 
                         (tx->flags & PROTO_I2C_TRANSFER_FLAG_START) != 0,
                         (tx->flags & PROTO_I2C_TRANSFER_FLAG_REPEATED_START) != 0,
                         (tx->flags & PROTO_I2C_TRANSFER_FLAG_STOP) != 0,
@@ -296,7 +339,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
                         if (errorCode == 0) {
                             ProtoResI2cTransfer *t = &cmd->response.response.i2cTransfer;
                             
-                            UBUS_DBG(("Have transfer command response, status: %u, cmd: %u", t->status, cmd->response.cmd));
+                            UBUS_DBG(("[I2C] Have transfer command response, status: %u, cmd: %u", t->status, cmd->response.cmd));
 
                             switch (t->status) {
                                 case PROTO_I2C_STATUS_OK:
@@ -343,7 +386,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
         }
     }
 
-    UBUS_DBG(("Transfer of %d I2C messages has finished with status: %d", num, ret));
+    UBUS_DBG(("[I2C] Transfer of %d I2C messages has finished with status: %d", num, ret));
 
     return ret;
 }
@@ -462,9 +505,10 @@ static int _workerRoutine(void *arg) {
                             }
                         }
 
-                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c", 
+                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c", 
                             info->version.major, info->version.minor, info->packetSize, 
-                            (info->features & PROTO_FEATURE_I2C) != 0 ? 'Y' : 'N'
+                            (info->features & PROTO_FEATURE_I2C) != 0 ? 'Y' : 'N',
+                            (info->features & PROTO_FEATURE_1W) != 0 ? 'Y' : 'N'
                         ));
 
                         if ((info->features & PROTO_FEATURE_I2C) != 0) {
@@ -473,6 +517,21 @@ static int _workerRoutine(void *arg) {
                             ret = i2c_add_adapter(&ubus->i2cAdapter);
                             if (ret == 0) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
+                            }
+                        }
+
+
+                        if ((info->features & PROTO_FEATURE_1W) != 0) {
+                            UBUS_DBG(("Reginstering new 1wire device in kernel"));
+
+                            ubus->w1Master.data = ubus;
+
+                            ret = w1_add_master_device(&ubus->w1Master);
+                            if (ret == 0) {
+                                UBUS_LOG(("Created new 1wire device"));
+                                
+                            } else {
+                                ubus->w1Master.data = NULL;
                             }
                         }
                     }
@@ -618,6 +677,10 @@ static void _ldiscCleanup(UbusUart **ubus) {
 
     i2c_del_adapter(&b->i2cAdapter);
 
+    if (b->w1Master.data != NULL) {
+        w1_remove_master_device(&b->w1Master);
+    }
+
     if (b->worker) {
         UBUS_DBG(("Stopping ubus worker"));
 
@@ -676,6 +739,19 @@ static int _ldiscOpen(struct tty_struct *tty) {
             ubus->i2cAdapter.algo      = &_ubusI2cAlgo;
     
             strncpy(ubus->i2cAdapter.name, "microbus-i2c", sizeof(ubus->i2cAdapter.name));
+        }
+
+        if (ret == 0) {
+            ubus->w1Master.read_byte   = _w1ReadByte;
+            ubus->w1Master.write_byte  = _w1WriteByte;
+
+            ubus->w1Master.read_block  = _w1ReadBlock;
+            ubus->w1Master.write_block = _w1WriteBlock;
+
+            ubus->w1Master.reset_bus   = _w1ResetBus;
+            ubus->w1Master.search      = _w1Search;
+
+            ubus->w1Master.data = NULL;
         }
 
         if (ret == 0) {

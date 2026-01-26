@@ -21,6 +21,7 @@
 #define PROTO_CMD_GET_INFO 0x0
 
 #define PROTO_FEATURE_I2C (1 << 0)
+#define PROTO_FEATURE_1W  (1 << 1)
 
 /*
  * 2) CMD_I2C_TRANSFER
@@ -37,6 +38,11 @@
  * [STATUS][RX_DATA]
  */
 #define PROTO_CMD_I2C_TRANSFER 0x1
+
+/*
+ * 3) CMD_1W_TRANSFER
+ */
+#define PROTO_CMD_1W_TRANSFER  0x2
 
 #define PROTO_I2C_TRANSFER_FLAG_START          (1 << 0)
 #define PROTO_I2C_TRANSFER_FLAG_REPEATED_START (1 << 1)

@@ -45,7 +45,7 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
             {
                 DBG(("PROTO_CMD_GET_INFO"));
 
-                response->response.getInfo.features |= PROTO_FEATURE_I2C;
+                response->response.getInfo.features = PROTO_FEATURE_I2C | PROTO_FEATURE_1W;
             }
             break;
 
@@ -65,6 +65,12 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
                 if (! (t.flags & PROTO_I2C_TRANSFER_FLAG_READ)) {
                     spdlog::info("Data to write {:a16}", spdlog::to_hex(t.data, t.data + t.dataSize));
                 }
+            }
+            break;
+
+        case PROTO_CMD_1W_TRANSFER:
+            {
+                DBG(("PROTO_CMD_1W_TRANSFER"));
             }
             break;
 

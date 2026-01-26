@@ -71,6 +71,9 @@ Please refer to:
 
 ## Example Use Cases
 
+## I²C
+---
+
 * Assumptions
   * System environment
     * ``I2C_DEV_NO`` - index of the I²C bus to be used (e.g. 1)
@@ -146,6 +149,18 @@ sudo bash -c "echo tsl2561 0x39 > /sys/bus/i2c/devices/i2c-${I2C_DEV_NO}/new_dev
 cat /sys/bus/iio/devices/iio\:device0/in_illuminance0_input 
 ```
 
+## 1Wire
+---
+* Assumptions
+  * Kernel modules
+    * ``wire`` module is loaded 
+        ```bash
+        sudo modprobe wire
+        ```
+### Listing master devices
+```bash
+ls -al /sys/bus/w1/devices/
+``` 
 ---
 
 ## Project Status
