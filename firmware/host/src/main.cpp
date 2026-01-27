@@ -45,7 +45,7 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
             {
                 DBG(("PROTO_CMD_GET_INFO"));
 
-                response->response.getInfo.features = PROTO_FEATURE_I2C | PROTO_FEATURE_1W;
+                response->response.getInfo.features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW;
             }
             break;
 
@@ -68,7 +68,7 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
             }
             break;
 
-        case PROTO_CMD_1W_TRANSFER:
+        case PROTO_CMD_OW_TRANSFER:
             {
                 DBG(("PROTO_CMD_1W_TRANSFER"));
             }

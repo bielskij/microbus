@@ -33,6 +33,23 @@ void proto_req_init(ProtoReq *request, void *memory, uint16_t memorySize, uint8_
             }
             break;
 
+        case PROTO_CMD_OW_TRANSFER:
+            {
+                ProtoReqOwTransfer *t = &request->request.owTransfer;
+
+                static const uint8_t overhead = 1; // flags
+
+                if (memorySize > overhead) {
+                    t->dataSize = memorySize - overhead;
+
+                } else {
+                    t->dataSize = 0;
+                }
+
+                t->data  = NULL;
+                t->flags = 0;
+            }
+
         default:
             break;
     }
@@ -59,6 +76,25 @@ void proto_req_assign(ProtoReq *request, void *memory, uint16_t memorySize) {
                 } else {
                     if (memory && memorySize >= dataOffset) {
                         t->data = PTR_U8(memory) + dataOffset;
+
+                    } else {
+                        t->data     = NULL;
+                        t->dataSize = 0;
+                    }
+                }
+            }
+            break;
+
+        case PROTO_CMD_OW_TRANSFER:
+            {
+                ProtoReqOwTransfer *t = &request->request.owTransfer;
+
+                if (t->flags & PROTO_OW_TRANSFER_FLAG_READ) {
+                    t->data = NULL;
+
+                } else {
+                    if (memory && memorySize) {
+                        t->data = PTR_U8(memory) + 1;
 
                     } else {
                         t->data     = NULL;
@@ -97,6 +133,21 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
                     }
 
                     if (t->flags & PROTO_I2C_TRANSFER_FLAG_READ) {
+                        ret += proto_int_val_encode(t->dataSize, PTR_U8(memory) + ret);
+
+                    } else {
+                        ret += t->dataSize;
+                    }
+                }
+                break;
+
+            case PROTO_CMD_OW_TRANSFER:
+                {
+                    ProtoReqOwTransfer *t = &request->request.owTransfer;
+
+                    PTR_U8(memory)[ret++] = t->flags;
+
+                    if (t->flags & PROTO_OW_TRANSFER_FLAG_READ) {
                         ret += proto_int_val_encode(t->dataSize, PTR_U8(memory) + ret);
 
                     } else {
@@ -160,6 +211,43 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
 
                     if (ret) {
                         if (t->flags & PROTO_I2C_TRANSFER_FLAG_READ) {
+                            uint8_t lenSize = proto_int_val_length_probe(*memoryP);
+
+                            ret = memorySize >= lenSize;
+                            if (ret) {
+                                t->dataSize = proto_int_val_decode(memoryP);
+
+                                memoryP    += lenSize;
+                                memorySize -= lenSize;
+                            }
+
+                        } else {
+                            t->dataSize = memorySize;
+                            t->data     = memoryP;
+                        }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_OW_TRANSFER:
+                {
+                    ProtoReqOwTransfer *t = &request->request.owTransfer;
+
+                    t->data     = NULL;
+                    t->dataSize = 0;
+
+                    if (ret) {
+                        ret = memorySize != 0;
+                        if (ret) {
+                            t->flags = *memoryP;
+
+                            memoryP++;
+                            memorySize--;
+                        }
+                    }
+
+                    if (ret) {
+                        if (t->flags & PROTO_OW_TRANSFER_FLAG_READ) {
                             uint8_t lenSize = proto_int_val_length_probe(*memoryP);
 
                             ret = memorySize >= lenSize;

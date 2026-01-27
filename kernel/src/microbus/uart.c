@@ -212,12 +212,54 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
 }
 
 static u8 _w1ResetBus(void *devData) {
-    UbusUart *ubus = (UbusUart *) devData;
+    u8 ret = 1;
 
-    UBUS_TRACE(("[W1]: reseting bus"));
+    {
+        UbusUart *ubus = (UbusUart *) devData;
+
+        UBUS_TRACE(("[W1]: reseting bus"));
+
+        {
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            if (cmd) {
+                ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
+
+                t->flags |= PROTO_OW_TRANSFER_FLAG_RESET;
+                
+                cmd_prepare(cmd);
+                cmd_enqueue(ubus, cmd);
+                cmd_wait(cmd);
+                
+                {
+                    int errorCode = cmd->errorCode;
+
+                    if (errorCode == 0) {
+                        ProtoResOwTransfer *res = cmd->response.response.owTransfer;
+
+                        if (res->status == PROTO_OW_STATUS_RESET_PRESENCE) {
+                            ret = 0;
+
+                        } else if (res->status == PROTO_OW_STATUS_RESET_NO_PRESENCE) {
+                            ret = 1;
+
+                        } else {
+                            UBUS_ERR(("Received unexpected status code %02", res->status));
+
+                            ret = -1;
+                        }
+
+                    } else {
+                        ret = -1;
+                    }
+                }
+
+                cmd_free(cmd);
+            }
+        }
+    }
 
     //  return -1=Error, 0=Device present, 1=No device present
-    return 1;
+    return ret;
 }
 
 static u8 _w1ReadByte(void *devData) {
@@ -508,7 +550,7 @@ static int _workerRoutine(void *arg) {
                         UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c", 
                             info->version.major, info->version.minor, info->packetSize, 
                             (info->features & PROTO_FEATURE_I2C) != 0 ? 'Y' : 'N',
-                            (info->features & PROTO_FEATURE_1W) != 0 ? 'Y' : 'N'
+                            (info->features & PROTO_FEATURE_OW) != 0 ? 'Y' : 'N'
                         ));
 
                         if ((info->features & PROTO_FEATURE_I2C) != 0) {
@@ -521,7 +563,7 @@ static int _workerRoutine(void *arg) {
                         }
 
 
-                        if ((info->features & PROTO_FEATURE_1W) != 0) {
+                        if ((info->features & PROTO_FEATURE_OW) != 0) {
                             UBUS_DBG(("Reginstering new 1wire device in kernel"));
 
                             ubus->w1Master.data = ubus;

@@ -21,7 +21,7 @@
 #define PROTO_CMD_GET_INFO 0x0
 
 #define PROTO_FEATURE_I2C (1 << 0)
-#define PROTO_FEATURE_1W  (1 << 1)
+#define PROTO_FEATURE_OW  (1 << 1)
 
 /*
  * 2) CMD_I2C_TRANSFER
@@ -30,19 +30,14 @@
  *   ADDR - (optional) slave address, exists only when PROTO_I2C_TRANSFER_FLAG_START or PROTO_I2C_TRANSFER_FLAG_REPEATED_START is set.
  *   TX_DATA - (optional) transmit buffer to send to the slave device.
  * 
- * [  1B   ][  1B  ][  ...  ]
- * [ FLAGS ][ ADDR ][TX_DATA]
+ * [  1B   ][  1B  ][... ]
+ * [ FLAGS ][ ADDR ][DATA]
  * 
  * Response
- * [  1B  ][  ...  ]
- * [STATUS][RX_DATA]
+ * [  1B  ][... ]
+ * [STATUS][DATA]
  */
 #define PROTO_CMD_I2C_TRANSFER 0x1
-
-/*
- * 3) CMD_1W_TRANSFER
- */
-#define PROTO_CMD_1W_TRANSFER  0x2
 
 #define PROTO_I2C_TRANSFER_FLAG_START          (1 << 0)
 #define PROTO_I2C_TRANSFER_FLAG_REPEATED_START (1 << 1)
@@ -55,5 +50,36 @@
 #define PROTO_I2C_STATUS_NAK_DATA    2
 #define PROTO_I2C_STATUS_ARB_LOST    3 // Arbitration lost
 #define PROTO_I2C_STATUS_TIMEOUT     4 // Timeout occurred in TWI internals
+
+/*
+ * 3) CMD_1W_TRANSFER
+ *
+ * Request
+ *   TX_DATA - (optional) transmit buffer to send to the slave device.
+ * 
+ * [ 1B  ][... ]
+ * [FLAGS][DATA]
+ * 
+ * Response
+ * [  1B  ][... ]
+ * [STATUS][DATA]
+ */
+#define PROTO_CMD_OW_TRANSFER  0x2
+
+#define PROTO_OW_TRANSFER_FLAG_RESET (1 << 0)
+#define PROTO_OW_TRANSFER_FLAG_READ  (1 << 1)
+
+// Read/write cmd results
+#define PROTO_OW_STATUS_OK                  0
+
+// Reset cmd results
+#define PROTO_OW_STATUS_RESET_PRESENCE      1
+#define PROTO_OW_STATUS_RESET_NO_PRESENCE   2
+
+// Scan cmd results
+#define PROTO_OW_STATUS_SCAN_START          3
+#define PROTO_OW_STATUS_SCAN_STEP           4
+#define PROTO_OW_STATUS_SCAN_END            5
+
 
 #endif /* FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_ */

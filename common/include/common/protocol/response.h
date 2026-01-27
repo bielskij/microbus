@@ -34,12 +34,20 @@ typedef struct _ProtoResI2cTransfer {
 	uint16_t rxBufferSize;
 } ProtoResI2cTransfer;
 
+typedef struct _ProtoResOwTransfer {
+    uint8_t  status;
+
+    uint8_t *rxBuffer;
+    uint16_t rxBufferSize;
+} ProtoResOwTransfer;
+
 typedef struct _ProtoRes {
 	uint8_t cmd;
 
 	union {
 		ProtoResGetInfo     getInfo;
 		ProtoResI2cTransfer i2cTransfer;
+        ProtoResOwTransfer  owTransfer;
 	} response;
 } ProtoRes;
 

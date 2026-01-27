@@ -22,12 +22,20 @@ typedef struct _ProtoReqI2CTransfer {
 	uint16_t dataSize;
 } ProtoReqI2CTransfer;
 
+typedef struct _ProtoReqOwTransfer {
+    uint8_t  flags;
+    
+    uint8_t *data;
+    uint16_t dataSize;
+} ProtoReqOwTransfer;
+
 typedef struct _ProtoReq {
 	uint8_t cmd;
 
 	union {
 		ProtoReqGetInfo     getInfo;
 		ProtoReqI2CTransfer i2cTransfer;
+        ProtoReqOwTransfer  owTransfer;
 	} request;
 } ProtoReq;
 

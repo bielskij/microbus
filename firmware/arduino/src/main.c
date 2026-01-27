@@ -21,7 +21,7 @@ static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *ca
             {
                 ProtoResGetInfo *info = &response->response.getInfo;
 
-                info->features = PROTO_FEATURE_I2C | PROTO_FEATURE_1W;
+                info->features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW;
             }
             break;
 
