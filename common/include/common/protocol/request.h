@@ -23,10 +23,20 @@ typedef struct _ProtoReqI2CTransfer {
 } ProtoReqI2CTransfer;
 
 typedef struct _ProtoReqOwTransfer {
-    uint8_t  flags;
-    
-    uint8_t *data;
-    uint16_t dataSize;
+    uint8_t  mode;
+
+    union {
+        struct {
+
+        } searchStart;
+
+        struct {
+            uint64_t romId;
+            uint8_t  searchBit;
+            uint8_t  descBit;
+            uint8_t  lastZero;
+        } searchStep;
+    } data;
 } ProtoReqOwTransfer;
 
 typedef struct _ProtoReq {

@@ -334,6 +334,68 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
                 ASSERT_EQ(t.data[i], i);
             }
         },
+    },
+
+    // Scan start
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.mode = PROTO_OW_TRANSFER_TYPE_RESET;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.mode, PROTO_OW_TRANSFER_TYPE_RESET);
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.mode = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.mode, PROTO_OW_TRANSFER_TYPE_SEARCH_START);
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.mode = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
+
+            t.data.searchStep.romId     = 0x8877665544332211ULL;
+            t.data.searchStep.descBit   = 1;
+            t.data.searchStep.lastZero  = 2;
+            t.data.searchStep.searchBit = 3;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.mode, PROTO_OW_TRANSFER_TYPE_SEARCH_STEP);
+
+            ASSERT_EQ(t.data.searchStep.romId,     0x8877665544332211ULL);
+            ASSERT_EQ(t.data.searchStep.descBit,   1);
+            ASSERT_EQ(t.data.searchStep.lastZero,  2);
+            ASSERT_EQ(t.data.searchStep.searchBit, 3);
+        }
     }
 
     // RequestDecoderTestData {

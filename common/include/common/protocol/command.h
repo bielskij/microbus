@@ -55,10 +55,21 @@
  * 3) CMD_1W_TRANSFER
  *
  * Request
- *   TX_DATA - (optional) transmit buffer to send to the slave device.
+ * [ 1B ][... ]
+ * [TYPE][DATA]
  * 
- * [ 1B  ][... ]
- * [FLAGS][DATA]
+ * * RESET
+ * no extra data
+ * 
+ * * SEARCH_START
+ * no extra data
+ * 
+ * * SEARCH_STEP
+ * [   6B   ][1B][1B][1B]
+ * [ ROM_ID ][SB][DB][LZ]
+ *   - SB - search_bit
+ *   - DB - desc_bit
+ *   - LZ - last_zero
  * 
  * Response
  * [  1B  ][... ]
@@ -66,20 +77,24 @@
  */
 #define PROTO_CMD_OW_TRANSFER  0x2
 
-#define PROTO_OW_TRANSFER_FLAG_RESET (1 << 0)
-#define PROTO_OW_TRANSFER_FLAG_READ  (1 << 1)
+#define PROTO_OW_ROM_ID_SIZE 8
+
+#define PROTO_OW_TRANSFER_TYPE_UNKNOWN      (0)
+#define PROTO_OW_TRANSFER_TYPE_RESET        (1)
+#define PROTO_OW_TRANSFER_TYPE_READ         (2)
+#define PROTO_OW_TRANSFER_TYPE_WRITE        (3)
+#define PROTO_OW_TRANSFER_TYPE_SEARCH_START (4)
+#define PROTO_OW_TRANSFER_TYPE_SEARCH_STEP  (5)
 
 // Read/write cmd results
 #define PROTO_OW_STATUS_OK                  0
 
 // Reset cmd results
-#define PROTO_OW_STATUS_RESET_PRESENCE      1
-#define PROTO_OW_STATUS_RESET_NO_PRESENCE   2
+#define PROTO_OW_STATUS_RESET_NO_PRESENCE   1
 
 // Scan cmd results
-#define PROTO_OW_STATUS_SCAN_START          3
-#define PROTO_OW_STATUS_SCAN_STEP           4
-#define PROTO_OW_STATUS_SCAN_END            5
+#define PROTO_OW_STATUS_SEARCH_STEP         2
+#define PROTO_OW_STATUS_SEARCH_END          3
 
 
 #endif /* FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_ */

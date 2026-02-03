@@ -48,16 +48,16 @@ void proto_res_init(ProtoRes *response, void *memory, uint16_t memorySize, uint8
             {
                 ProtoResOwTransfer *t = &response->response.owTransfer;
 
-                uint8_t overHead = 1;
+                // uint8_t overHead = 1;
 
-                if (memorySize > overHead) {
-                    t->rxBufferSize = memorySize - overHead;
+                // if (memorySize > overHead) {
+                //     t->rxBufferSize = memorySize - overHead;
 
-                } else {
-                    t->rxBufferSize = 0;
-                }
+                // } else {
+                //     t->rxBufferSize = 0;
+                // }
 
-                t->rxBuffer = NULL;
+                // t->rxBuffer = NULL;
                 t->status   = PROTO_I2C_STATUS_OK;
             }
             break;
@@ -92,20 +92,20 @@ void proto_res_assign(ProtoRes *response, void *memory, uint16_t memorySize) {
             {
                 ProtoResOwTransfer *t = &response->response.owTransfer;
 
-                if (
-                    t->status == PROTO_OW_STATUS_OK ||
-                    t->status == PROTO_OW_STATUS_SCAN_STEP
-                ) {
-                    if (t->rxBufferSize) {
-                        t->rxBuffer = PTR_U8(memory) + 1;
+                // if (
+                //     t->status == PROTO_OW_STATUS_OK ||
+                //     t->status == PROTO_OW_STATUS_SCAN_STEP
+                // ) {
+                //     if (t->rxBufferSize) {
+                //         t->rxBuffer = PTR_U8(memory) + 1;
 
-                    } else {
-                        t->rxBuffer = NULL;
-                    }
-                } else {
-                    t->rxBuffer     = NULL;
-                    t->rxBufferSize = 0;
-                }
+                //     } else {
+                //         t->rxBuffer = NULL;
+                //     }
+                // } else {
+                //     t->rxBuffer     = NULL;
+                //     t->rxBufferSize = 0;
+                // }
             }
             break;
 
@@ -146,8 +146,6 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                     ProtoResOwTransfer *t = &response->response.owTransfer;
 
                     PTR_U8(memory)[ret++] = t->status;
-
-                    ret += t->rxBufferSize;
                 }
                 break;
 
@@ -236,26 +234,26 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                 {
                     ProtoResOwTransfer *t = &response->response.owTransfer;
 
-                    t->rxBuffer     = NULL;
-                    t->rxBufferSize = 0;
+                    // t->rxBuffer     = NULL;
+                    // t->rxBufferSize = 0;
 
-                    ret = memorySize != 0;
-                    if (ret) {
-                        t->status = *memoryP;
+                    // ret = memorySize != 0;
+                    // if (ret) {
+                    //     t->status = *memoryP;
 
-                        memoryP++;
-                        memorySize--;
-                    }
+                    //     memoryP++;
+                    //     memorySize--;
+                    // }
 
-                    if (ret) {
-                        if (
-                            t->status == PROTO_OW_STATUS_OK ||
-                            t->status == PROTO_OW_STATUS_SCAN_STEP
-                        ) {
-                            t->rxBufferSize = memorySize;
-                            t->rxBuffer     = memoryP;
-                        }
-                    }
+                    // if (ret) {
+                    //     if (
+                    //         t->status == PROTO_OW_STATUS_OK ||
+                    //         t->status == PROTO_OW_STATUS_SCAN_STEP
+                    //     ) {
+                    //         t->rxBufferSize = memorySize;
+                    //         t->rxBuffer     = memoryP;
+                    //     }
+                    // }
                 }
                 break;
 

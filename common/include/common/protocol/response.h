@@ -37,8 +37,18 @@ typedef struct _ProtoResI2cTransfer {
 typedef struct _ProtoResOwTransfer {
     uint8_t  status;
 
-    uint8_t *rxBuffer;
-    uint16_t rxBufferSize;
+    union {
+        struct {
+
+        } searchStart;
+
+        struct {
+            uint64_t romId;
+            uint8_t  searchBit;
+            uint8_t  descBit;
+            uint8_t  lastZero;
+        } searchStep;
+    } data;
 } ProtoResOwTransfer;
 
 typedef struct _ProtoRes {

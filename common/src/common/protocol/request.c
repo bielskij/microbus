@@ -37,17 +37,7 @@ void proto_req_init(ProtoReq *request, void *memory, uint16_t memorySize, uint8_
             {
                 ProtoReqOwTransfer *t = &request->request.owTransfer;
 
-                static const uint8_t overhead = 1; // flags
-
-                if (memorySize > overhead) {
-                    t->dataSize = memorySize - overhead;
-
-                } else {
-                    t->dataSize = 0;
-                }
-
-                t->data  = NULL;
-                t->flags = 0;
+                t->mode = PROTO_OW_TRANSFER_TYPE_UNKNOWN;
             }
 
         default:
@@ -89,18 +79,6 @@ void proto_req_assign(ProtoReq *request, void *memory, uint16_t memorySize) {
             {
                 ProtoReqOwTransfer *t = &request->request.owTransfer;
 
-                if (t->flags & PROTO_OW_TRANSFER_FLAG_READ) {
-                    t->data = NULL;
-
-                } else {
-                    if (memory && memorySize) {
-                        t->data = PTR_U8(memory) + 1;
-
-                    } else {
-                        t->data     = NULL;
-                        t->dataSize = 0;
-                    }
-                }
             }
             break;
 
@@ -145,21 +123,33 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
                 {
                     ProtoReqOwTransfer *t = &request->request.owTransfer;
 
-                    PTR_U8(memory)[ret++] = t->flags;
+                    PTR_U8(memory)[ret++] = t->mode;
 
-                    if (t->flags & PROTO_OW_TRANSFER_FLAG_READ) {
-                        ret += proto_int_val_encode(t->dataSize, PTR_U8(memory) + ret);
+                    switch (t->mode) {
+                        case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
+                            {
+                                uint64_t romId = t->data.searchStep.romId;
 
-                    } else {
-                        ret += t->dataSize;
+                                for (uint8_t i = 0; i < PROTO_OW_ROM_ID_SIZE; i++) {
+                                    PTR_U8(memory)[ret + i] = romId;
+                                    romId >>= 8;
+                                }
+
+                                ret += PROTO_OW_ROM_ID_SIZE;
+
+                                PTR_U8(memory)[ret++] = t->data.searchStep.searchBit;
+                                PTR_U8(memory)[ret++] = t->data.searchStep.descBit;
+                                PTR_U8(memory)[ret++] = t->data.searchStep.lastZero;
+                            }
+                            break;
+
+                        default:
+                            break;
                     }
                 }
                 break;
 
             default:
-                {
-
-                }
                 break;
         }
     }
@@ -233,13 +223,10 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                 {
                     ProtoReqOwTransfer *t = &request->request.owTransfer;
 
-                    t->data     = NULL;
-                    t->dataSize = 0;
-
                     if (ret) {
-                        ret = memorySize != 0;
+                        ret = memorySize > 0;
                         if (ret) {
-                            t->flags = *memoryP;
+                            t->mode = *memoryP;
 
                             memoryP++;
                             memorySize--;
@@ -247,20 +234,33 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                     }
 
                     if (ret) {
-                        if (t->flags & PROTO_OW_TRANSFER_FLAG_READ) {
-                            uint8_t lenSize = proto_int_val_length_probe(*memoryP);
+                        switch (t->mode) {
+                            case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
+                                {
+                                    ret = memorySize > PROTO_OW_ROM_ID_SIZE;
+                                    if (ret) {
+                                        for (uint8_t i = PROTO_OW_ROM_ID_SIZE; i > 0; i--) {
+                                            t->data.searchStep.romId <<= 8;
+                                            t->data.searchStep.romId |= memoryP[i - 1];
+                                        }
+                                        
+                                        memoryP    += PROTO_OW_ROM_ID_SIZE;
+                                        memorySize -= PROTO_OW_ROM_ID_SIZE;
+                                    }
 
-                            ret = memorySize >= lenSize;
-                            if (ret) {
-                                t->dataSize = proto_int_val_decode(memoryP);
+                                    if (ret) {
+                                        ret = memorySize >= 3;
+                                        if (ret) {
+                                            t->data.searchStep.searchBit = memoryP[0];
+                                            t->data.searchStep.descBit   = memoryP[1];
+                                            t->data.searchStep.lastZero  = memoryP[2];
 
-                                memoryP    += lenSize;
-                                memorySize -= lenSize;
-                            }
-
-                        } else {
-                            t->dataSize = memorySize;
-                            t->data     = memoryP;
+                                            memoryP    += 3;
+                                            memorySize -= 3;
+                                        }
+                                    }
+                                }
+                                break;
                         }
                     }
                 }
