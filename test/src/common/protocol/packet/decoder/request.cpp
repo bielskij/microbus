@@ -58,13 +58,13 @@ static std::vector<uint8_t> genCmd(uint8_t cmd, uint8_t id, std::function<void(P
 
 TEST_P(RequestDecoderTestWithParameter, common_protocol) {
     auto data = genCmd(
-        GetParam().cmd, 1, 
+        GetParam().cmd, 1,
         [](ProtoReq &res) {
             auto &f = GetParam().prepareReq;
             if (f) {
                 f(res);
             }
-        }, 
+        },
         [](ProtoReq &res) {
             auto &f = GetParam().fillReq;
             if (f) {
@@ -298,7 +298,7 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
             ASSERT_EQ(t.slaveAddress, 0);
             ASSERT_EQ(t.flags,        0);
             ASSERT_NE(t.data,         nullptr);
-            
+
             for (uint16_t i = 0; i < t.dataSize; i++) {
                 ASSERT_EQ(t.data[i], i);
             }
@@ -336,13 +336,13 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
         },
     },
 
-    // Scan start
+    // OW reset
     RequestDecoderTestData {
         PROTO_CMD_OW_TRANSFER,
         [](ProtoReq &req){
             auto &t = req.request.owTransfer;
 
-            t.mode = PROTO_OW_TRANSFER_TYPE_RESET;
+            t.type = PROTO_OW_TRANSFER_TYPE_RESET;
         },
         [](ProtoReq &req){
             auto &t = req.request.owTransfer;
@@ -350,7 +350,7 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
         [](ProtoReq &req){
             auto &t = req.request.owTransfer;
 
-            ASSERT_EQ(t.mode, PROTO_OW_TRANSFER_TYPE_RESET);
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_RESET);
         }
     },
 
@@ -359,7 +359,7 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
         [](ProtoReq &req){
             auto &t = req.request.owTransfer;
 
-            t.mode = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+            t.type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
         },
         [](ProtoReq &req){
             auto &t = req.request.owTransfer;
@@ -367,7 +367,7 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
         [](ProtoReq &req){
             auto &t = req.request.owTransfer;
 
-            ASSERT_EQ(t.mode, PROTO_OW_TRANSFER_TYPE_SEARCH_START);
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_SEARCH_START);
         }
     },
 
@@ -376,7 +376,7 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
         [](ProtoReq &req){
             auto &t = req.request.owTransfer;
 
-            t.mode = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
+            t.type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
 
             t.data.searchStep.romId     = 0x8877665544332211ULL;
             t.data.searchStep.descBit   = 1;
@@ -389,12 +389,63 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
         [](ProtoReq &req){
             auto &t = req.request.owTransfer;
 
-            ASSERT_EQ(t.mode, PROTO_OW_TRANSFER_TYPE_SEARCH_STEP);
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_SEARCH_STEP);
 
             ASSERT_EQ(t.data.searchStep.romId,     0x8877665544332211ULL);
             ASSERT_EQ(t.data.searchStep.descBit,   1);
             ASSERT_EQ(t.data.searchStep.lastZero,  2);
             ASSERT_EQ(t.data.searchStep.searchBit, 3);
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.type = PROTO_OW_TRANSFER_TYPE_READ;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.data.transfer.dataSize = 256;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_READ);
+
+            ASSERT_EQ(t.data.transfer.dataSize, 256);
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.type = PROTO_OW_TRANSFER_TYPE_WRITE;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.data.transfer.dataSize = 223;
+
+            for (uint8_t i = 0; i < t.data.transfer.dataSize; i++) {
+                t.data.transfer.data[i] = i;
+            }
+
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_WRITE);
+
+            ASSERT_EQ(t.data.transfer.dataSize, 223);
+
+            for (uint8_t i = 0; i < t.data.transfer.dataSize; i++) {
+                ASSERT_EQ(t.data.transfer.data[i], i);
+            }
         }
     }
 

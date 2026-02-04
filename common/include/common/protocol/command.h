@@ -29,10 +29,10 @@
  * Request
  *   ADDR - (optional) slave address, exists only when PROTO_I2C_TRANSFER_FLAG_START or PROTO_I2C_TRANSFER_FLAG_REPEATED_START is set.
  *   TX_DATA - (optional) transmit buffer to send to the slave device.
- * 
+ *
  * [  1B   ][  1B  ][... ]
  * [ FLAGS ][ ADDR ][DATA]
- * 
+ *
  * Response
  * [  1B  ][... ]
  * [STATUS][DATA]
@@ -57,20 +57,20 @@
  * Request
  * [ 1B ][... ]
  * [TYPE][DATA]
- * 
+ *
  * * RESET
  * no extra data
- * 
+ *
  * * SEARCH_START
  * no extra data
- * 
+ *
  * * SEARCH_STEP
  * [   6B   ][1B][1B][1B]
  * [ ROM_ID ][SB][DB][LZ]
  *   - SB - search_bit
  *   - DB - desc_bit
  *   - LZ - last_zero
- * 
+ *
  * Response
  * [  1B  ][... ]
  * [STATUS][DATA]
@@ -87,14 +87,14 @@
 #define PROTO_OW_TRANSFER_TYPE_SEARCH_STEP  (5)
 
 // Read/write cmd results
-#define PROTO_OW_STATUS_OK                  0
+#define PROTO_OW_STATUS_OK            0
 
 // Reset cmd results
-#define PROTO_OW_STATUS_RESET_NO_PRESENCE   1
+#define PROTO_OW_STATUS_NO_PRESENCE   1
 
 // Scan cmd results
-#define PROTO_OW_STATUS_SEARCH_STEP         2
-#define PROTO_OW_STATUS_SEARCH_END          3
+#define PROTO_OW_STATUS_SEARCH_STEP   2
+#define PROTO_OW_STATUS_SEARCH_END    3
 
 
 #endif /* FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_ */

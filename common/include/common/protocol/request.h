@@ -15,20 +15,21 @@ typedef struct _ProtoReqGetInfo {
 } ProtoReqGetInfo;
 
 typedef struct _ProtoReqI2CTransfer {
-	uint8_t  flags;
-	uint8_t  slaveAddress;
+    uint8_t  flags;
+    uint8_t  slaveAddress;
 
-	uint8_t *data;
-	uint16_t dataSize;
+    uint8_t *data;
+    uint16_t dataSize;
 } ProtoReqI2CTransfer;
 
 typedef struct _ProtoReqOwTransfer {
-    uint8_t  mode;
+    uint8_t type;
 
     union {
         struct {
-
-        } searchStart;
+            uint8_t *data;
+            uint16_t dataSize;
+        } transfer;
 
         struct {
             uint64_t romId;
@@ -40,13 +41,13 @@ typedef struct _ProtoReqOwTransfer {
 } ProtoReqOwTransfer;
 
 typedef struct _ProtoReq {
-	uint8_t cmd;
+    uint8_t cmd;
 
-	union {
-		ProtoReqGetInfo     getInfo;
-		ProtoReqI2CTransfer i2cTransfer;
+    union {
+        ProtoReqGetInfo     getInfo;
+        ProtoReqI2CTransfer i2cTransfer;
         ProtoReqOwTransfer  owTransfer;
-	} request;
+    } request;
 } ProtoReq;
 
 void     proto_req_init  (ProtoReq *request, void *memory, uint16_t memorySize, uint8_t cmd);

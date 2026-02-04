@@ -11,37 +11,39 @@ extern "C" {
 #endif
 
 typedef struct _ProtoResError {
-	uint8_t code;
+    uint8_t code;
 } ProtoResError;
 
 typedef struct _ProtoResGetInfo {
-	/// Protocol version
-	struct {
-		uint8_t major;
-		uint8_t minor;
-	} version;
+    /// Protocol version
+    struct {
+        uint8_t major;
+        uint8_t minor;
+    } version;
 
-	/// Maximal supported size of packet.
-	uint16_t packetSize;
+    /// Maximal supported size of packet.
+    uint16_t packetSize;
 
-	uint8_t features;
+    uint8_t features;
 } ProtoResGetInfo;
 
 typedef struct _ProtoResI2cTransfer {
-	uint8_t status;
+    uint8_t status;
 
-	uint8_t *rxBuffer;
-	uint16_t rxBufferSize;
+    uint8_t *rxBuffer;
+    uint16_t rxBufferSize;
 } ProtoResI2cTransfer;
 
 typedef struct _ProtoResOwTransfer {
-    uint8_t  status;
+    uint8_t status;
+    uint8_t type;
 
     union {
         struct {
-
-        } searchStart;
-
+            uint8_t *data;
+            uint16_t dataSize;
+        } transfer;
+        
         struct {
             uint64_t romId;
             uint8_t  searchBit;
@@ -52,13 +54,13 @@ typedef struct _ProtoResOwTransfer {
 } ProtoResOwTransfer;
 
 typedef struct _ProtoRes {
-	uint8_t cmd;
+    uint8_t cmd;
 
-	union {
-		ProtoResGetInfo     getInfo;
-		ProtoResI2cTransfer i2cTransfer;
+    union {
+        ProtoResGetInfo     getInfo;
+        ProtoResI2cTransfer i2cTransfer;
         ProtoResOwTransfer  owTransfer;
-	} response;
+    } response;
 } ProtoRes;
 
 void     proto_res_init  (ProtoRes *response, void *memory, uint16_t memorySize, uint8_t cmd);

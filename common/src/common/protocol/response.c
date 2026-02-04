@@ -48,17 +48,8 @@ void proto_res_init(ProtoRes *response, void *memory, uint16_t memorySize, uint8
             {
                 ProtoResOwTransfer *t = &response->response.owTransfer;
 
-                // uint8_t overHead = 1;
-
-                // if (memorySize > overHead) {
-                //     t->rxBufferSize = memorySize - overHead;
-
-                // } else {
-                //     t->rxBufferSize = 0;
-                // }
-
-                // t->rxBuffer = NULL;
-                t->status   = PROTO_I2C_STATUS_OK;
+                t->status = PROTO_OW_STATUS_OK;
+                t->type   = PROTO_OW_TRANSFER_TYPE_UNKNOWN;
             }
             break;
 
@@ -92,20 +83,14 @@ void proto_res_assign(ProtoRes *response, void *memory, uint16_t memorySize) {
             {
                 ProtoResOwTransfer *t = &response->response.owTransfer;
 
-                // if (
-                //     t->status == PROTO_OW_STATUS_OK ||
-                //     t->status == PROTO_OW_STATUS_SCAN_STEP
-                // ) {
-                //     if (t->rxBufferSize) {
-                //         t->rxBuffer = PTR_U8(memory) + 1;
+                if (t->type == PROTO_OW_TRANSFER_TYPE_READ) {
+                    t->data.transfer.data     = PTR_U8(memory) + 1;
+                    t->data.transfer.dataSize = memorySize - 1;
 
-                //     } else {
-                //         t->rxBuffer = NULL;
-                //     }
-                // } else {
-                //     t->rxBuffer     = NULL;
-                //     t->rxBufferSize = 0;
-                // }
+                } else if (t->type == PROTO_OW_TRANSFER_TYPE_WRITE) {
+                    t->data.transfer.data     = NULL;
+                    t->data.transfer.dataSize = 0;
+                }
             }
             break;
 
@@ -146,6 +131,34 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                     ProtoResOwTransfer *t = &response->response.owTransfer;
 
                     PTR_U8(memory)[ret++] = t->status;
+
+                    switch (t->type) {
+                        case PROTO_OW_TRANSFER_TYPE_READ:
+                            {
+                                ret += t->data.transfer.dataSize;
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
+                            {
+                                uint64_t romId = t->data.searchStep.romId;
+
+                                for (uint8_t i = 0; i < PROTO_OW_ROM_ID_SIZE; i++) {
+                                    PTR_U8(memory)[ret + i] = romId;
+                                    romId >>= 8;
+                                }
+
+                                ret += PROTO_OW_ROM_ID_SIZE;
+
+                                PTR_U8(memory)[ret++] = t->data.searchStep.searchBit;
+                                PTR_U8(memory)[ret++] = t->data.searchStep.descBit;
+                                PTR_U8(memory)[ret++] = t->data.searchStep.lastZero;
+                            }
+                            break;
+
+                        default:
+                            break;
+                    }
                 }
                 break;
 
@@ -234,26 +247,46 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                 {
                     ProtoResOwTransfer *t = &response->response.owTransfer;
 
-                    // t->rxBuffer     = NULL;
-                    // t->rxBufferSize = 0;
+                    ret = memorySize != 0;
+                    if (ret) {
+                        t->status = *memoryP;
 
-                    // ret = memorySize != 0;
-                    // if (ret) {
-                    //     t->status = *memoryP;
+                        memoryP++;
+                        memorySize--;
+                    }
 
-                    //     memoryP++;
-                    //     memorySize--;
-                    // }
+                    if (ret) {
+                        if (t->status == PROTO_OW_STATUS_OK) {
+                            if (t->type == PROTO_OW_TRANSFER_TYPE_READ) {
+                                t->data.transfer.data     = memoryP;
+                                t->data.transfer.dataSize = memorySize;
+                            }
 
-                    // if (ret) {
-                    //     if (
-                    //         t->status == PROTO_OW_STATUS_OK ||
-                    //         t->status == PROTO_OW_STATUS_SCAN_STEP
-                    //     ) {
-                    //         t->rxBufferSize = memorySize;
-                    //         t->rxBuffer     = memoryP;
-                    //     }
-                    // }
+                        } else if (t->status == PROTO_OW_STATUS_SEARCH_STEP) {
+                            ret = memorySize > PROTO_OW_ROM_ID_SIZE;
+                            if (ret) {
+                                for (uint8_t i = PROTO_OW_ROM_ID_SIZE; i > 0; i--) {
+                                    t->data.searchStep.romId <<= 8;
+                                    t->data.searchStep.romId |= memoryP[i - 1];
+                                }
+
+                                memoryP    += PROTO_OW_ROM_ID_SIZE;
+                                memorySize -= PROTO_OW_ROM_ID_SIZE;
+                            }
+
+                            if (ret) {
+                                ret = memorySize >= 3;
+                                if (ret) {
+                                    t->data.searchStep.searchBit = memoryP[0];
+                                    t->data.searchStep.descBit   = memoryP[1];
+                                    t->data.searchStep.lastZero  = memoryP[2];
+
+                                    memoryP    += 3;
+                                    memorySize -= 3;
+                                }
+                            }
+                        }
+                    }
                 }
                 break;
 

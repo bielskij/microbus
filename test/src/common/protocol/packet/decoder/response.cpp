@@ -58,13 +58,13 @@ static std::vector<uint8_t> genCmd(uint8_t cmd, uint8_t id, std::function<void(P
 
 TEST_P(ResponseDecoderTestWithParameter, common_protocol) {
     auto data = genCmd(
-        GetParam().cmd, 1, 
+        GetParam().cmd, 1,
         [](ProtoRes &res) {
             auto &f = GetParam().prepareRes;
             if (f) {
                 f(res);
             }
-        }, 
+        },
         [](ProtoRes &res) {
             auto &f = GetParam().fillRes;
             if (f) {
@@ -125,7 +125,7 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
             i.version.minor = 5;
         },
         [](ProtoRes &res) {
-            
+
         },
         [](ProtoRes &res) {
             auto &i = res.response.getInfo;
@@ -216,22 +216,48 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
         }
     },
 
-    // Write response
+    // OW
     ResponseDecoderTestData {
-        PROTO_CMD_I2C_TRANSFER,
+        PROTO_CMD_OW_TRANSFER,
         [](ProtoRes &res) {
-            auto &t = res.response.i2cTransfer;
+            auto &t = res.response.owTransfer;
 
-            t.rxBufferSize = 0;
-            t.status       = PROTO_I2C_STATUS_OK;
+            t.status = PROTO_OW_STATUS_NO_PRESENCE;
         },
         [](ProtoRes &res) {
         },
         [](ProtoRes &res) {
-            auto &t = res.response.i2cTransfer;
-            
-            ASSERT_EQ(t.rxBufferSize, 0);
-            ASSERT_EQ(t.status,       PROTO_I2C_STATUS_OK);
+            auto &t = res.response.owTransfer;
+
+            ASSERT_EQ(t.status, PROTO_OW_STATUS_NO_PRESENCE);
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            t.type   = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
+            t.status = PROTO_OW_STATUS_SEARCH_STEP;
+
+            t.data.searchStep.romId     = 0x8877665544332211ULL;
+            t.data.searchStep.descBit   = 1;
+            t.data.searchStep.lastZero  = 2;
+            t.data.searchStep.searchBit = 3;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            ASSERT_EQ(t.status, PROTO_OW_STATUS_SEARCH_STEP);
+
+            ASSERT_EQ(t.data.searchStep.romId,     0x8877665544332211ULL);
+            ASSERT_EQ(t.data.searchStep.descBit,   1);
+            ASSERT_EQ(t.data.searchStep.lastZero,  2);
+            ASSERT_EQ(t.data.searchStep.searchBit, 3);
         }
     }
 ));

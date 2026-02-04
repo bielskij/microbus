@@ -111,7 +111,7 @@ static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
 
     init_completion(&cmd->workerCompletion);
     init_completion(&cmd->cmdCompletion);
-    
+
     cmd->id = (u8) atomic_inc_return(&ubus->nextCmdId);
 
     // Initialize request
@@ -225,11 +225,11 @@ static u8 _w1ResetBus(void *devData) {
                 ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
 
                 t->flags |= PROTO_OW_TRANSFER_FLAG_RESET;
-                
+
                 cmd_prepare(cmd);
                 cmd_enqueue(ubus, cmd);
                 cmd_wait(cmd);
-                
+
                 {
                     int errorCode = cmd->errorCode;
 
@@ -239,7 +239,7 @@ static u8 _w1ResetBus(void *devData) {
                         if (res->status == PROTO_OW_STATUS_RESET_PRESENCE) {
                             ret = 0;
 
-                        } else if (res->status == PROTO_OW_STATUS_RESET_NO_PRESENCE) {
+                        } else if (res->status == PROTO_OW_STATUS_NO_PRESENCE) {
                             ret = 1;
 
                         } else {
@@ -363,7 +363,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
                         }
                     }
 
-                    UBUS_DBG(("[I2C] Scheduling transfer command START/REP: %d/%d, STOP: %d, READ: %d, CONT: %d, len: %u", 
+                    UBUS_DBG(("[I2C] Scheduling transfer command START/REP: %d/%d, STOP: %d, READ: %d, CONT: %d, len: %u",
                         (tx->flags & PROTO_I2C_TRANSFER_FLAG_START) != 0,
                         (tx->flags & PROTO_I2C_TRANSFER_FLAG_REPEATED_START) != 0,
                         (tx->flags & PROTO_I2C_TRANSFER_FLAG_STOP) != 0,
@@ -380,7 +380,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
 
                         if (errorCode == 0) {
                             ProtoResI2cTransfer *t = &cmd->response.response.i2cTransfer;
-                            
+
                             UBUS_DBG(("[I2C] Have transfer command response, status: %u, cmd: %u", t->status, cmd->response.cmd));
 
                             switch (t->status) {
@@ -519,12 +519,12 @@ static int _workerRoutine(void *arg) {
 
                     ProtoResGetInfo *info = &response->response.getInfo;
 
-                    UBUS_DBG(("Received response cmd: %u, version %u.%u, payload size: %u, features: %02x", 
+                    UBUS_DBG(("Received response cmd: %u, version %u.%u, payload size: %u, features: %02x",
                         response->cmd, info->version.major, info->version.minor, info->packetSize, info->features
                     ));
 
                     if (
-                        info->version.major != PROTO_VERSION_MAJOR || 
+                        info->version.major != PROTO_VERSION_MAJOR ||
                         info->version.minor != PROTO_VERSION_MINOR
                     ) {
                         UBUS_ERR(("Received response from device that uses not supported protocol version %u.%u != %u.%u",
@@ -547,15 +547,15 @@ static int _workerRoutine(void *arg) {
                             }
                         }
 
-                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c", 
-                            info->version.major, info->version.minor, info->packetSize, 
+                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c",
+                            info->version.major, info->version.minor, info->packetSize,
                             (info->features & PROTO_FEATURE_I2C) != 0 ? 'Y' : 'N',
                             (info->features & PROTO_FEATURE_OW) != 0 ? 'Y' : 'N'
                         ));
 
                         if ((info->features & PROTO_FEATURE_I2C) != 0) {
                             UBUS_DBG(("Registering new i2c device in kernel"));
-                            
+
                             ret = i2c_add_adapter(&ubus->i2cAdapter);
                             if (ret == 0) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
@@ -571,7 +571,7 @@ static int _workerRoutine(void *arg) {
                             ret = w1_add_master_device(&ubus->w1Master);
                             if (ret == 0) {
                                 UBUS_LOG(("Created new 1wire device"));
-                                
+
                             } else {
                                 ubus->w1Master.data = NULL;
                             }
@@ -663,7 +663,7 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
                         uint8_t errorCode = PROTO_PKT_DES_RET_GET_ERROR_CODE(decRet);
 
                         if (errorCode != PROTO_NO_ERROR) {
-                            UBUS_ERR(("Received protocol error: %u for command id: %u", 
+                            UBUS_ERR(("Received protocol error: %u for command id: %u",
                                 errorCode, cmd->requestPacket.id
                             ));
 
@@ -676,7 +676,7 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
                                 UBUS_WARN(("Received successful response for different ID (id %u != %u)", pkt->id, cmd->requestPacket.id));
 
                             } else {
-                                UBUS_DBG(("Received successful response for command %u, id: %u, payloadLength: %u/%u (read %zd of %zd)", 
+                                UBUS_DBG(("Received successful response for command %u, id: %u, payloadLength: %u/%u (read %zd of %zd)",
                                     pkt->code, pkt->id, pkt->payloadUsed, pkt->payloadSize, ret, count
                                 ));
 
@@ -779,7 +779,7 @@ static int _ldiscOpen(struct tty_struct *tty) {
 
             ubus->i2cAdapter.algo_data = ubus;
             ubus->i2cAdapter.algo      = &_ubusI2cAlgo;
-    
+
             strncpy(ubus->i2cAdapter.name, "microbus-i2c", sizeof(ubus->i2cAdapter.name));
         }
 
