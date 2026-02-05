@@ -212,3 +212,164 @@ TEST(common_protocol, request_i2c_transfer) {
         }
     }
 }
+
+TEST(common_protocol, request_ow_transfer) {
+    uint8_t buffer[64];
+
+    uint16_t bufferWritten;
+
+    {
+        ProtoReq request;
+
+        proto_req_init(&request, buffer, sizeof(buffer), PROTO_CMD_OW_TRANSFER);
+
+        ASSERT_EQ(request.cmd, PROTO_CMD_OW_TRANSFER);
+
+        {
+            auto &t = request.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_UNKNOWN);
+        }
+    }
+
+    {
+        ProtoReq request;
+
+        proto_req_init(&request, buffer, sizeof(buffer), PROTO_CMD_OW_TRANSFER);
+
+        {
+            auto &t = request.request.owTransfer;
+
+            {
+                t.type = PROTO_OW_TRANSFER_TYPE_WRITE;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                ASSERT_NE(t.data.transfer.dataSize, 0);
+
+                t.data.transfer.dataSize = 0;
+
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 1);
+
+                t.data.transfer.dataSize = 128;
+
+                bufferWritten = proto_req_encode(&request, buffer, sizeof(buffer));
+                ASSERT_EQ(bufferWritten, 129);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.owTransfer.type = request.request.owTransfer.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.owTransfer.type,                   request.request.owTransfer.type);
+                    ASSERT_EQ(decoded.request.owTransfer.data.transfer.data,     request.request.owTransfer.data.transfer.data);
+                    ASSERT_EQ(decoded.request.owTransfer.data.transfer.dataSize, request.request.owTransfer.data.transfer.dataSize);
+                }
+            }
+
+            {
+                t.type = PROTO_OW_TRANSFER_TYPE_READ;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                ASSERT_EQ(t.data.transfer.dataSize, 0);
+                ASSERT_EQ(t.data.transfer.data,     nullptr);
+
+                request.request.owTransfer.data.transfer.dataSize = 1;
+
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 2);
+
+                request.request.owTransfer.data.transfer.dataSize = 190;
+
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 3);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.owTransfer.type = request.request.owTransfer.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.owTransfer.type,                   request.request.owTransfer.type);
+                    ASSERT_EQ(decoded.request.owTransfer.data.transfer.data,     request.request.owTransfer.data.transfer.data);
+                    ASSERT_EQ(decoded.request.owTransfer.data.transfer.dataSize, request.request.owTransfer.data.transfer.dataSize);
+                }
+            }
+
+            {
+                t.type = PROTO_OW_TRANSFER_TYPE_RESET;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 1);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.owTransfer.type = request.request.owTransfer.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.owTransfer.type, request.request.owTransfer.type);
+                }
+            }
+
+            {
+                t.type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 1);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.owTransfer.type = request.request.owTransfer.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.owTransfer.type, request.request.owTransfer.type);
+                }
+            }
+
+            {
+                t.type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                request.request.owTransfer.data.searchStep.romId     = 0x1122334455667788ULL;
+                request.request.owTransfer.data.searchStep.lastZero  = 1;
+                request.request.owTransfer.data.searchStep.romId     = 2;
+                request.request.owTransfer.data.searchStep.searchBit = 3;
+
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 12);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.owTransfer.type = request.request.owTransfer.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.owTransfer.type,                      request.request.owTransfer.type);
+                    ASSERT_EQ(decoded.request.owTransfer.data.searchStep.romId,     request.request.owTransfer.data.searchStep.romId);
+                    ASSERT_EQ(decoded.request.owTransfer.data.searchStep.lastZero,  request.request.owTransfer.data.searchStep.lastZero);
+                    ASSERT_EQ(decoded.request.owTransfer.data.searchStep.descBit,   request.request.owTransfer.data.searchStep.descBit);
+                    ASSERT_EQ(decoded.request.owTransfer.data.searchStep.searchBit, request.request.owTransfer.data.searchStep.searchBit);
+                }
+            }
+        }
+    }
+}

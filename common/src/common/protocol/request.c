@@ -301,6 +301,8 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                                 if (memorySize) {
                                     uint8_t lenSize = proto_int_val_length_probe(*memoryP);
 
+                                    t->data.transfer.data = NULL;
+
                                     ret = memorySize >= lenSize;
                                     if (ret) {
                                         t->data.transfer.dataSize = proto_int_val_decode(memoryP);
