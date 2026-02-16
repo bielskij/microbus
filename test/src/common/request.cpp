@@ -68,7 +68,7 @@ TEST(common_protocol, request_i2c_transfer) {
 
             {
                 t.flags = \
-                    PROTO_I2C_TRANSFER_FLAG_READ | 
+                    PROTO_I2C_TRANSFER_FLAG_READ |
                     PROTO_I2C_TRANSFER_FLAG_START;
 
                 proto_req_assign(&request, buffer, sizeof(buffer));
@@ -347,12 +347,11 @@ TEST(common_protocol, request_ow_transfer) {
 
                 proto_req_assign(&request, buffer, sizeof(buffer));
 
-                request.request.owTransfer.data.searchStep.romId     = 0x1122334455667788ULL;
-                request.request.owTransfer.data.searchStep.lastZero  = 1;
-                request.request.owTransfer.data.searchStep.romId     = 2;
-                request.request.owTransfer.data.searchStep.searchBit = 3;
+                request.request.owTransfer.data.search.romId     = 0x1122334455667788ULL;
+                request.request.owTransfer.data.search.lastZero  = 1;
+                request.request.owTransfer.data.search.romId     = 2;
 
-                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 12);
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 11);
 
                 {
                     ProtoReq decoded;
@@ -364,10 +363,9 @@ TEST(common_protocol, request_ow_transfer) {
                     ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
 
                     ASSERT_EQ(decoded.request.owTransfer.type,                      request.request.owTransfer.type);
-                    ASSERT_EQ(decoded.request.owTransfer.data.searchStep.romId,     request.request.owTransfer.data.searchStep.romId);
-                    ASSERT_EQ(decoded.request.owTransfer.data.searchStep.lastZero,  request.request.owTransfer.data.searchStep.lastZero);
-                    ASSERT_EQ(decoded.request.owTransfer.data.searchStep.descBit,   request.request.owTransfer.data.searchStep.descBit);
-                    ASSERT_EQ(decoded.request.owTransfer.data.searchStep.searchBit, request.request.owTransfer.data.searchStep.searchBit);
+                    ASSERT_EQ(decoded.request.owTransfer.data.search.romId,     request.request.owTransfer.data.search.romId);
+                    ASSERT_EQ(decoded.request.owTransfer.data.search.lastZero,  request.request.owTransfer.data.search.lastZero);
+                    ASSERT_EQ(decoded.request.owTransfer.data.search.descBit,   request.request.owTransfer.data.search.descBit);
                 }
             }
         }

@@ -54,7 +54,7 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
                 auto &t = request->request.i2cTransfer;
 
                 DBG(("PROTO_CMD_I2C_TRANSFER {}-{:x} | {}: {} | {}",
-                    t.flags & PROTO_I2C_TRANSFER_FLAG_START ? "STA" : 
+                    t.flags & PROTO_I2C_TRANSFER_FLAG_START ? "STA" :
                         t.flags & PROTO_I2C_TRANSFER_FLAG_REPEATED_START ? "RSTA" : "-",
                     t.flags & (PROTO_I2C_TRANSFER_FLAG_START | PROTO_I2C_TRANSFER_FLAG_REPEATED_START) ? t.slaveAddress : 0,
                     t.flags & PROTO_I2C_TRANSFER_FLAG_READ ? 'R' : 'W',
@@ -70,7 +70,19 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
 
         case PROTO_CMD_OW_TRANSFER:
             {
-                DBG(("PROTO_CMD_1W_TRANSFER"));
+                auto &t = request->request.owTransfer;
+
+                DBG(("PROTO_CMD_OW_TRANSFER"));
+
+                response->response.owTransfer.type = t.type;
+
+                switch (t.type) {
+                    case PROTO_OW_TRANSFER_TYPE_RESET:
+                        {
+                            response->response.owTransfer.status = PROTO_OW_STATUS_OK;
+                        }
+                        break;
+                }
             }
             break;
 

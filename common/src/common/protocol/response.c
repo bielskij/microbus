@@ -141,7 +141,7 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
 
                         case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
                             {
-                                uint64_t romId = t->data.searchStep.romId;
+                                uint64_t romId = t->data.search.romId;
 
                                 for (uint8_t i = 0; i < PROTO_OW_ROM_ID_SIZE; i++) {
                                     PTR_U8(memory)[ret + i] = romId;
@@ -150,9 +150,8 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
 
                                 ret += PROTO_OW_ROM_ID_SIZE;
 
-                                PTR_U8(memory)[ret++] = t->data.searchStep.searchBit;
-                                PTR_U8(memory)[ret++] = t->data.searchStep.descBit;
-                                PTR_U8(memory)[ret++] = t->data.searchStep.lastZero;
+                                PTR_U8(memory)[ret++] = t->data.search.descBit;
+                                PTR_U8(memory)[ret++] = t->data.search.lastZero;
                             }
                             break;
 
@@ -266,8 +265,8 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                             ret = memorySize > PROTO_OW_ROM_ID_SIZE;
                             if (ret) {
                                 for (uint8_t i = PROTO_OW_ROM_ID_SIZE; i > 0; i--) {
-                                    t->data.searchStep.romId <<= 8;
-                                    t->data.searchStep.romId |= memoryP[i - 1];
+                                    t->data.search.romId <<= 8;
+                                    t->data.search.romId |= memoryP[i - 1];
                                 }
 
                                 memoryP    += PROTO_OW_ROM_ID_SIZE;
@@ -275,14 +274,13 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                             }
 
                             if (ret) {
-                                ret = memorySize >= 3;
+                                ret = memorySize >= 2;
                                 if (ret) {
-                                    t->data.searchStep.searchBit = memoryP[0];
-                                    t->data.searchStep.descBit   = memoryP[1];
-                                    t->data.searchStep.lastZero  = memoryP[2];
+                                    t->data.search.descBit   = memoryP[0];
+                                    t->data.search.lastZero  = memoryP[1];
 
-                                    memoryP    += 3;
-                                    memorySize -= 3;
+                                    memoryP    += 2;
+                                    memorySize -= 2;
                                 }
                             }
                         }

@@ -229,7 +229,7 @@ TEST(common_protocol, response_ow_transfer) {
             proto_res_init(&response, buffer, sizeof(buffer), PROTO_CMD_OW_TRANSFER);
 
             response.response.owTransfer.type   = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
-            response.response.owTransfer.status = PROTO_OW_STATUS_SEARCH_END;
+            response.response.owTransfer.status = PROTO_OW_STATUS_SEARCH_DONE_EMPTY;
 
             proto_res_assign(&response, buffer, sizeof(buffer));
 
@@ -260,13 +260,12 @@ TEST(common_protocol, response_ow_transfer) {
 
             proto_res_assign(&response, buffer, sizeof(buffer));
 
-            response.response.owTransfer.data.searchStep.romId     = 0x1122334455667788ULL;
-            response.response.owTransfer.data.searchStep.descBit   = 1;
-            response.response.owTransfer.data.searchStep.lastZero  = 2;
-            response.response.owTransfer.data.searchStep.searchBit = 3;
+            response.response.owTransfer.data.search.romId     = 0x1122334455667788ULL;
+            response.response.owTransfer.data.search.descBit   = 1;
+            response.response.owTransfer.data.search.lastZero  = 2;
 
             bufferWritten = proto_res_encode(&response, buffer, sizeof(buffer));
-            ASSERT_EQ(bufferWritten, 12);
+            ASSERT_EQ(bufferWritten, 11);
 
             {
                 ProtoRes decoded;
@@ -282,10 +281,9 @@ TEST(common_protocol, response_ow_transfer) {
                 ASSERT_EQ(decoded.response.owTransfer.status, response.response.owTransfer.status);
                 ASSERT_EQ(decoded.response.owTransfer.type,   response.response.owTransfer.type);
 
-                ASSERT_EQ(decoded.response.owTransfer.data.searchStep.descBit,   response.response.owTransfer.data.searchStep.descBit);
-                ASSERT_EQ(decoded.response.owTransfer.data.searchStep.lastZero,  response.response.owTransfer.data.searchStep.lastZero);
-                ASSERT_EQ(decoded.response.owTransfer.data.searchStep.romId,     response.response.owTransfer.data.searchStep.romId);
-                ASSERT_EQ(decoded.response.owTransfer.data.searchStep.searchBit, response.response.owTransfer.data.searchStep.searchBit);
+                ASSERT_EQ(decoded.response.owTransfer.data.search.descBit,   response.response.owTransfer.data.search.descBit);
+                ASSERT_EQ(decoded.response.owTransfer.data.search.lastZero,  response.response.owTransfer.data.search.lastZero);
+                ASSERT_EQ(decoded.response.owTransfer.data.search.romId,     response.response.owTransfer.data.search.romId);
             }
         }
     }

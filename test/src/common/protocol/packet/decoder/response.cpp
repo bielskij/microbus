@@ -241,10 +241,9 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
             t.type   = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
             t.status = PROTO_OW_STATUS_SEARCH_STEP;
 
-            t.data.searchStep.romId     = 0x8877665544332211ULL;
-            t.data.searchStep.descBit   = 1;
-            t.data.searchStep.lastZero  = 2;
-            t.data.searchStep.searchBit = 3;
+            t.data.search.romId     = 0x8877665544332211ULL;
+            t.data.search.descBit   = 1;
+            t.data.search.lastZero  = 2;
         },
         [](ProtoRes &res) {
             auto &t = res.response.owTransfer;
@@ -254,10 +253,9 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
 
             ASSERT_EQ(t.status, PROTO_OW_STATUS_SEARCH_STEP);
 
-            ASSERT_EQ(t.data.searchStep.romId,     0x8877665544332211ULL);
-            ASSERT_EQ(t.data.searchStep.descBit,   1);
-            ASSERT_EQ(t.data.searchStep.lastZero,  2);
-            ASSERT_EQ(t.data.searchStep.searchBit, 3);
+            ASSERT_EQ(t.data.search.romId,     0x8877665544332211ULL);
+            ASSERT_EQ(t.data.search.descBit,   1);
+            ASSERT_EQ(t.data.search.lastZero,  2);
         }
     }
 ));

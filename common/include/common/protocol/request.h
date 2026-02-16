@@ -33,10 +33,9 @@ typedef struct _ProtoReqOwTransfer {
 
         struct {
             uint64_t romId;
-            uint8_t  searchBit;
             uint8_t  descBit;
             uint8_t  lastZero;
-        } searchStep;
+        } search;
     } data;
 } ProtoReqOwTransfer;
 

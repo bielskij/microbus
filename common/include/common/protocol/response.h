@@ -43,13 +43,12 @@ typedef struct _ProtoResOwTransfer {
             uint8_t *data;
             uint16_t dataSize;
         } transfer;
-        
+
         struct {
             uint64_t romId;
-            uint8_t  searchBit;
             uint8_t  descBit;
             uint8_t  lastZero;
-        } searchStep;
+        } search;
     } data;
 } ProtoResOwTransfer;
 

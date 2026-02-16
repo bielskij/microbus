@@ -55,9 +55,9 @@ void i2c_initialize(void) {
 uint8_t i2c_start() {
     _i2cExec(_BV(TWSTA));
     _i2cWait((TWCR & _BV(TWINT)) == 0, PROTO_I2C_STATUS_TIMEOUT);
-    
+
     if (
-        TW_STATUS != TW_START && 
+        TW_STATUS != TW_START &&
         TW_STATUS != TW_REP_START
     ) {
         _i2cExec(0);
@@ -89,7 +89,7 @@ uint8_t i2c_readByte(uint8_t *b, bool ack) {
             return PROTO_I2C_STATUS_ARB_LOST;
         }
     }
-    
+
     *b = TWDR;
 
     return PROTO_I2C_STATUS_OK;

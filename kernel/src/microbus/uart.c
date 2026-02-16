@@ -104,6 +104,7 @@ typedef struct _UbusUart {
 
     struct i2c_adapter   i2cAdapter;
     struct w1_bus_master w1Master;
+    char                 w1MasterId[64];
 } UbusUart;
 
 static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
@@ -224,9 +225,9 @@ static u8 _w1ResetBus(void *devData) {
             if (cmd) {
                 ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
 
-                t->flags |= PROTO_OW_TRANSFER_FLAG_RESET;
+                t->type = PROTO_OW_TRANSFER_TYPE_RESET;
 
-                cmd_prepare(cmd);
+                cmd_prepare(ubus, cmd);
                 cmd_enqueue(ubus, cmd);
                 cmd_wait(cmd);
 
@@ -234,9 +235,9 @@ static u8 _w1ResetBus(void *devData) {
                     int errorCode = cmd->errorCode;
 
                     if (errorCode == 0) {
-                        ProtoResOwTransfer *res = cmd->response.response.owTransfer;
+                        ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
 
-                        if (res->status == PROTO_OW_STATUS_RESET_PRESENCE) {
+                        if (res->status == PROTO_OW_STATUS_OK) {
                             ret = 0;
 
                         } else if (res->status == PROTO_OW_STATUS_NO_PRESENCE) {
@@ -253,7 +254,7 @@ static u8 _w1ResetBus(void *devData) {
                     }
                 }
 
-                cmd_free(cmd);
+                cmd_free(&cmd);
             }
         }
     }
@@ -784,6 +785,8 @@ static int _ldiscOpen(struct tty_struct *tty) {
         }
 
         if (ret == 0) {
+            strncpy(ubus->w1MasterId, "microbus-ow", sizeof(ubus->w1MasterId) - 1);
+
             ubus->w1Master.read_byte   = _w1ReadByte;
             ubus->w1Master.write_byte  = _w1WriteByte;
 
@@ -793,7 +796,8 @@ static int _ldiscOpen(struct tty_struct *tty) {
             ubus->w1Master.reset_bus   = _w1ResetBus;
             ubus->w1Master.search      = _w1Search;
 
-            ubus->w1Master.data = NULL;
+            ubus->w1Master.dev_id = ubus->w1MasterId;
+            ubus->w1Master.data   = NULL;
         }
 
         if (ret == 0) {
