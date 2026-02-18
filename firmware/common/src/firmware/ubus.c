@@ -50,7 +50,7 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
                 _sendError(hub, PROTO_ERROR_INVALID_MESSAGE);
                 break;
             }
-            
+
             {
                 proto_res_init(&response, pkt->payload, pkt->payloadSize, pkt->code);
 
@@ -83,11 +83,19 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
                         } else {
                             if (request.request.i2cTransfer.flags & PROTO_I2C_TRANSFER_FLAG_READ) {
                                 res->rxBufferSize = request.request.i2cTransfer.dataSize;
-                                
+
                             } else {
                                 res->rxBufferSize = 0;
                             }
                         }
+                    }
+                    break;
+
+                case PROTO_CMD_OW_TRANSFER:
+                    {
+                        ProtoResOwTransfer *res = &response.response.owTransfer;
+
+                        res->type = request.request.owTransfer.type;
                     }
                     break;
 

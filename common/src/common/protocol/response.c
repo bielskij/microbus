@@ -140,7 +140,11 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                             break;
 
                         case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
-                            {
+                        case PROTO_OW_TRANSFER_TYPE_SEARCH_START:
+                            if (
+                                (t->status == PROTO_OW_STATUS_SEARCH_DONE_FOUND) ||
+                                (t->status == PROTO_OW_STATUS_SEARCH_STEP)
+                            ) {
                                 uint64_t romId = t->data.search.romId;
 
                                 for (uint8_t i = 0; i < PROTO_OW_ROM_ID_SIZE; i++) {
@@ -261,7 +265,10 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                                 t->data.transfer.dataSize = memorySize;
                             }
 
-                        } else if (t->status == PROTO_OW_STATUS_SEARCH_STEP) {
+                        } else if (
+                            (t->status == PROTO_OW_STATUS_SEARCH_STEP) ||
+                            (t->status == PROTO_OW_STATUS_SEARCH_DONE_FOUND)
+                        ) {
                             ret = memorySize > PROTO_OW_ROM_ID_SIZE;
                             if (ret) {
                                 for (uint8_t i = PROTO_OW_ROM_ID_SIZE; i > 0; i--) {

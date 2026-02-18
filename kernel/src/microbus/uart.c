@@ -209,7 +209,55 @@ static int cmd_wait(UbusCmd *cmd) {
 }
 
 static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1_slave_found_callback callback) {
+    UbusUart *ubus = (UbusUart *) devData;
+
     UBUS_TRACE(("[W1]: Search type: %02x", searchType));
+
+    {
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+
+        ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
+        ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
+
+        req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+        res->type = req->type;
+
+        bool wasLast = false;
+        do {
+            cmd_prepare(ubus, cmd);
+            cmd_enqueue(ubus, cmd);
+            cmd_wait(cmd);
+
+            UBUS_DBG(("[W1] Search step, status: %02x, rn: 0x%llx, descBit: %u, lastZero: %u",
+                res->status, res->data.search.romId, res->data.search.descBit, res->data.search.lastZero
+            ));
+
+            if (res->status != PROTO_OW_STATUS_SEARCH_STEP) {
+                wasLast = true;
+            }
+
+            if (
+                (res->status == PROTO_OW_STATUS_SEARCH_DONE_FOUND) ||
+                (res->status == PROTO_OW_STATUS_SEARCH_STEP)
+            ) {
+                UBUS_DBG(("[W1] Calling callback with ID: 0x%llx", res->data.search.romId));
+
+                callback(master, res->data.search.romId);
+            }
+
+            if (! wasLast) {
+                cmd = cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+
+                req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
+                res->type = req->type;
+
+                req->data.search.descBit  = res->data.search.descBit;
+                req->data.search.lastZero = res->data.search.lastZero;
+                req->data.search.romId    = res->data.search.romId;
+            }
+
+        } while (! wasLast);
+    }
 }
 
 static u8 _w1ResetBus(void *devData) {
@@ -244,7 +292,7 @@ static u8 _w1ResetBus(void *devData) {
                             ret = 1;
 
                         } else {
-                            UBUS_ERR(("Received unexpected status code %02", res->status));
+                            UBUS_ERR(("Received unexpected status code %02x", res->status));
 
                             ret = -1;
                         }

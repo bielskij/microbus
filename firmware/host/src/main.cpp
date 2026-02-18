@@ -35,6 +35,16 @@ static uint8_t        packetBuffer[packetSize];
 
 static volatile bool interrupted = false;
 
+static const uint64_t ds1820Ids[] = {
+    0x11000003a16db128ULL,
+    0x1f000003a16a8728ULL,
+
+    0x5CA14F02917C3A10ULL,
+    0xE6031977B2148D10ULL,
+    0x2B6D419E0AC25510ULL,
+    0x975A88336E09F110ULL
+};
+
 static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void *callbackData) {
     auto *ctx = reinterpret_cast<Context *>(callbackData);
 
@@ -70,16 +80,60 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
 
         case PROTO_CMD_OW_TRANSFER:
             {
-                auto &t = request->request.owTransfer;
+                auto &req = request->request.owTransfer;
+                auto &res = response->response.owTransfer;
 
                 DBG(("PROTO_CMD_OW_TRANSFER"));
 
-                response->response.owTransfer.type = t.type;
-
-                switch (t.type) {
+                switch (req.type) {
                     case PROTO_OW_TRANSFER_TYPE_RESET:
                         {
-                            response->response.owTransfer.status = PROTO_OW_STATUS_OK;
+                            res.status = PROTO_OW_STATUS_OK;
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_SEARCH_START:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_SEARCH_START]"));
+
+                            res.status = PROTO_OW_STATUS_SEARCH_STEP;
+
+                            res.data.search.descBit  = 0;
+                            res.data.search.lastZero = 0;
+                            res.data.search.romId    = ds1820Ids[0];
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_SEARCH_STEP: {}, {}, {:x}]",
+                                req.data.search.descBit, req.data.search.lastZero, req.data.search.romId
+                            ));
+
+                            auto owSearchDescBit  = req.data.search.descBit;
+                            auto owSearchLastZero = req.data.search.lastZero;
+                            auto owSearchRn       = req.data.search.romId;
+
+                            if (owSearchLastZero < 5) {
+                                owSearchLastZero++;
+                                owSearchDescBit++;
+
+                                owSearchRn = ds1820Ids[owSearchDescBit];
+
+                                res.status = PROTO_OW_STATUS_SEARCH_STEP;
+
+                            } else {
+                                owSearchDescBit  = 0;
+                                owSearchLastZero = 0;
+
+                                owSearchRn = ds1820Ids[5];
+
+                                res.status = PROTO_OW_STATUS_SEARCH_DONE_FOUND;
+                            }
+
+                            res.data.search.descBit  = owSearchDescBit;
+                            res.data.search.lastZero = owSearchLastZero;
+                            res.data.search.romId    = owSearchRn;
                         }
                         break;
                 }
