@@ -276,7 +276,7 @@ TEST(common_protocol, request_ow_transfer) {
 
                 proto_req_assign(&request, buffer, sizeof(buffer));
 
-                ASSERT_EQ(t.data.transfer.dataSize, 0);
+                ASSERT_NE(t.data.transfer.dataSize, 0);
                 ASSERT_EQ(t.data.transfer.data,     nullptr);
 
                 request.request.owTransfer.data.transfer.dataSize = 1;

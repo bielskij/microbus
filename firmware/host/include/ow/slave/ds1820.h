@@ -1,6 +1,9 @@
 #ifndef __OW_SLAVE_DS1820_H__
 #define __OW_SLAVE_DS1820_H__
 
+#include <spdlog/spdlog.h>
+#include <spdlog/fmt/bin_to_hex.h>
+
 #include "ow/slave.h"
 
 class Ds1820 : public OwSlave {
@@ -25,9 +28,11 @@ class Ds1820 : public OwSlave {
         }
 
         void read(std::vector<uint8_t> &data, size_t dataSize) override {
+            spdlog::debug("read: {}", dataSize);
         }
 
-        void write(std::vector<uint8_t> &data) override {
+        void write(const std::vector<uint8_t> &data) override {
+            spdlog::debug("write: {:a16}", spdlog::to_hex(data));
         }
 
         void reset() override {

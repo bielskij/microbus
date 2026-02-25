@@ -130,7 +130,7 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                 {
                     ProtoResOwTransfer *t = &response->response.owTransfer;
 
-                    PTR_U8(memory)[ret++] = t->status;
+                    PTR_U8(memory)[ret++] = ((t->status & 0x0f) << 4) | (t->type & 0x0f);
 
                     switch (t->type) {
                         case PROTO_OW_TRANSFER_TYPE_READ:
@@ -260,7 +260,8 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
 
                     ret = memorySize != 0;
                     if (ret) {
-                        t->status = *memoryP;
+                        t->status = *memoryP >> 4;
+                        t->type   = *memoryP & 0x0f;
 
                         memoryP++;
                         memorySize--;
@@ -286,7 +287,7 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                             (t->status == PROTO_OW_STATUS_SEARCH_STEP) ||
                             (t->status == PROTO_OW_STATUS_SEARCH_DONE_FOUND)
                         ) {
-                            ret = memorySize > PROTO_OW_ROM_ID_SIZE;
+                            ret = memorySize >= PROTO_OW_ROM_ID_SIZE;
                             if (ret) {
                                 for (uint8_t i = PROTO_OW_ROM_ID_SIZE; i > 0; i--) {
                                     t->data.search.romId <<= 8;
@@ -295,9 +296,7 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
 
                                 memoryP    += PROTO_OW_ROM_ID_SIZE;
                                 memorySize -= PROTO_OW_ROM_ID_SIZE;
-                            }
 
-                            if (ret) {
                                 if (t->status == PROTO_OW_STATUS_SEARCH_STEP) {
                                     ret = memorySize >= 2;
                                     if (ret) {

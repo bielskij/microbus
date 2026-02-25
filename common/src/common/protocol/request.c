@@ -91,7 +91,7 @@ void proto_req_assign(ProtoReq *request, void *memory, uint16_t memorySize) {
 
                     case PROTO_OW_TRANSFER_TYPE_READ:
                         t->data.transfer.data     = NULL;
-                        t->data.transfer.dataSize = 0;
+                        t->data.transfer.dataSize = memorySize - dataOffset;
                         break;
 
                     default:

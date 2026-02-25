@@ -230,8 +230,8 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
             cmd_enqueue(ubus, cmd);
             cmd_wait(cmd);
 
-            UBUS_DBG(("[W1] Search step, status: %02x, rn: 0x%llx, descBit: %u, lastZero: %u",
-                res->status, res->data.search.romId, res->data.search.descBit, res->data.search.lastZero
+            UBUS_DBG(("[W1] Search step, status: %02x, rn: 0x%llx, descBit: %u, lastZero: %u, slaveCount: %d",
+                res->status, res->data.search.romId, res->data.search.descBit, res->data.search.lastZero, slaveCount
             ));
 
             if (res->status != PROTO_OW_STATUS_SEARCH_STEP) {
@@ -335,94 +335,115 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
 
     UBUS_TRACE(("[W1]: Writing block of length %d", bufferLength));
 
-    {
-        int written = 0;
+    if (bufferLength > 0) {
+        UbusUart *ubus = (UbusUart *) devData;
 
-        do {
-            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
-            if (cmd == NULL) {
-                break;
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        if (cmd != NULL) {
+            int totalWritten = 0;
+            
+            do {
+                ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
+                ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
 
-            } else {
-                ProtoReqOwTransfer *tx = &cmd->request.request.owTransfer;
-
-                size_t toSendDataSize = min(bufferLength - written, tx->data.transfer.dataSize);
-
-                tx->type = PROTO_OW_TRANSFER_TYPE_WRITE;
+                req->type = PROTO_OW_TRANSFER_TYPE_WRITE;
+                res->type = req->type;
 
                 cmd_prepare(ubus, cmd);
-                {
-                    tx->data.transfer.dataSize = toSendDataSize;
-
-                    if (toSendDataSize) {
-                        memcpy(tx->data.transfer.data, buffer + written, toSendDataSize);
-                    }
-                }
-                cmd_enqueue(ubus, cmd);
-                cmd_wait(cmd);
 
                 {
-                    int errorCode = cmd->errorCode;
+                    size_t toSendDataSize = min(bufferLength - totalWritten, req->data.transfer.dataSize);
 
-                    cmd_free(&cmd);
-
-                    if (errorCode == 0) {
-                        written += toSendDataSize;
+                    if (toSendDataSize == 0) {
+                        UBUS_WARN(("Read buffer too small - aborting"));
+                        
+                        break;
 
                     } else {
-                        break;
+                        req->data.transfer.dataSize = toSendDataSize;
+
+                        if (toSendDataSize) {
+                            memcpy(req->data.transfer.data, buffer + totalWritten, toSendDataSize);
+                        }
+
+                        cmd_enqueue(ubus, cmd);
+                        cmd_wait(cmd);
+
+                        if (cmd->errorCode == 0) {
+                            totalWritten += toSendDataSize;
+
+                        } else {
+                            break;
+                        }
                     }
                 }
-            }
 
-        } while (written != bufferLength);
+                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+            } while (totalWritten != bufferLength);
+
+            cmd_free(&cmd);
+        }
     }
 }
 
 static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
-    UbusUart *ubus = (UbusUart *) devData;
+    u8 totalRead = 0;
 
     UBUS_TRACE(("[W1]: Reading block of length %d", bufferLength));
 
-    {
-        int totalRead = 0;
+    if (bufferLength > 0) {
+        UbusUart *ubus = (UbusUart *) devData;
 
-        do {
-            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
-            if (cmd == NULL) {
-                break;
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        if (cmd != NULL) {
+            do {
+                ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
+                ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
 
-            } else {
-                ProtoReqOwTransfer *tx = &cmd->request.request.owTransfer;
-
-                tx->type = PROTO_OW_TRANSFER_TYPE_READ;
+                req->type = PROTO_OW_TRANSFER_TYPE_READ;
+                res->type = req->type;
 
                 cmd_prepare(ubus, cmd);
-                {
-                    size_t toReadDataSize = min(bufferLength - totalRead, tx->data.transfer.dataSize);
-
-                    tx->data.transfer.dataSize = toReadDataSize;
-                }
-                cmd_enqueue(ubus, cmd);
-                cmd_wait(cmd);
 
                 {
-                    int errorCode = cmd->errorCode;
+                    size_t toReadDataSize = min(bufferLength - totalRead, req->data.transfer.dataSize);
 
-                    cmd_free(&cmd);
-
-                    if (errorCode == 0) {
-                        totalRead += tx->data.transfer.dataSize;
+                    if (toReadDataSize == 0) {
+                        UBUS_WARN(("Read buffer too small - aborting"));
+                        
+                        break;
 
                     } else {
-                        break;
+                        req->data.transfer.dataSize = toReadDataSize;
+
+                        cmd_enqueue(ubus, cmd);
+                        cmd_wait(cmd);
+
+                        if (cmd->errorCode == 0) {
+                            uint16_t readSize = res->data.transfer.dataSize;
+UBUS_ERR(("TYPE: %u, %u", res->status, res->type));
+                            if (readSize == 0) {
+                                UBUS_WARN(("Received 0 bytes instead of expected %u - interrupting", req->data.transfer.dataSize));
+
+                                break;
+                            }
+
+                            totalRead += readSize;
+
+                        } else {
+                            break;
+                        }
                     }
                 }
-            }
-        } while (totalRead != bufferLength);
 
-        return totalRead;
+                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+            } while (totalRead != bufferLength);
+
+            cmd_free(&cmd);
+        }
     }
+
+    return totalRead;
 }
 
 static u8 _w1ReadByte(void *devData) {
