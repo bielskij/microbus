@@ -38,6 +38,8 @@ void proto_req_init(ProtoReq *request, void *memory, uint16_t memorySize, uint8_
                 ProtoReqOwTransfer *t = &request->request.owTransfer;
 
                 t->type = PROTO_OW_TRANSFER_TYPE_UNKNOWN;
+
+                t->data.transfer.dataSize = memorySize - 1;
             }
 
         default:
@@ -79,7 +81,7 @@ void proto_req_assign(ProtoReq *request, void *memory, uint16_t memorySize) {
             {
                 ProtoReqOwTransfer *t = &request->request.owTransfer;
 
-                uint8_t dataOffset = 1; // mode
+                uint8_t dataOffset = 1; // type
 
                 switch (t->type) {
                     case PROTO_OW_TRANSFER_TYPE_WRITE:
@@ -167,6 +169,12 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
                         case PROTO_OW_TRANSFER_TYPE_WRITE:
                             {
                                 ret += t->data.transfer.dataSize;
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_TOUCH_BIT:
+                            {
+                                PTR_U8(memory)[ret++] = t->data.touchBit.value;
                             }
                             break;
 
@@ -308,6 +316,15 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                                         memoryP    += lenSize;
                                         memorySize -= lenSize;
                                     }
+                                }
+                                break;
+
+                            case PROTO_OW_TRANSFER_TYPE_TOUCH_BIT:
+                                if (memorySize) {
+                                    t->data.touchBit.value = *memoryP;
+
+                                    memoryP++;
+                                    memorySize--;
                                 }
                                 break;
                         }

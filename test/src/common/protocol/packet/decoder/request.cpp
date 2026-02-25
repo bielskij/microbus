@@ -445,6 +445,27 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
                 ASSERT_EQ(t.data.transfer.data[i], i);
             }
         }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.type = PROTO_OW_TRANSFER_TYPE_TOUCH_BIT;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.data.touchBit.value = 1;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_TOUCH_BIT);
+
+            ASSERT_EQ(t.data.touchBit.value, 1);
+        }
     }
 
     // RequestDecoderTestData {

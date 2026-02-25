@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Jarosław Bielski <bielski.j@gmail.com>
 
+#include <vector>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -14,10 +15,16 @@
 
 #include "firmware/ubus.h"
 
+#include "ow/slave.h"
+#include "ow/slave/ds1820.h"
+
+#include "common/crc8.h"
 #include "common/protocol/command.h"
 
 #define DBG(x) spdlog::info x;
 #define ERR(x) spdlog::error x;
+
+#define CRC_POLY_OW 0x8C
 
 struct Context {
     int         ptyMasterFd;
@@ -35,15 +42,19 @@ static uint8_t        packetBuffer[packetSize];
 
 static volatile bool interrupted = false;
 
-static const uint64_t ds1820Ids[] = {
-    0x11000003a16db128ULL,
-    0x1f000003a16a8728ULL,
+static std::vector<std::unique_ptr<OwSlave>> _owSlaves;
 
-    0x5CA14F02917C3A10ULL,
-    0xE6031977B2148D10ULL,
-    0x2B6D419E0AC25510ULL,
-    0x975A88336E09F110ULL
-};
+static uint64_t _getOwRomCode(uint8_t familyCode, uint64_t sn) {
+    uint64_t ret = (sn << 8) | familyCode;
+
+    ret |= ((uint64_t) crc8_get((uint8_t *) &ret, 7, CRC_POLY_OW, 0) << 56);
+
+    return ret;
+}
+
+static uint64_t _getOwRomCode(std::unique_ptr<OwSlave> &slave) {
+    return _getOwRomCode(slave->getFamilyCode(), slave->getSerialNumber());
+}
 
 static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void *callbackData) {
     auto *ctx = reinterpret_cast<Context *>(callbackData);
@@ -83,11 +94,46 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
                 auto &req = request->request.owTransfer;
                 auto &res = response->response.owTransfer;
 
-                DBG(("PROTO_CMD_OW_TRANSFER"));
-
                 switch (req.type) {
+                    case PROTO_OW_TRANSFER_TYPE_WRITE:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_WRITE {}, data: {}]",
+                                req.data.transfer.dataSize, spdlog::to_hex(
+                                    req.data.transfer.data,
+                                    req.data.transfer.data + req.data.transfer.dataSize
+                                )
+                            ));
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_READ:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_READ {}]", req.data.transfer.dataSize));
+
+                            if (res.data.transfer.dataSize == 9) {
+                                res.data.transfer.data[0] = 0x00;
+                                res.data.transfer.data[1] = 0xa2; // 10.125C
+                                res.data.transfer.data[2] = 0x00;
+                                res.data.transfer.data[3] = 0x00;
+                                res.data.transfer.data[4] = 0x7f;
+                                res.data.transfer.data[5] = 0xff;
+                                res.data.transfer.data[6] = 0x00;
+                                res.data.transfer.data[7] = 0x10;
+                                res.data.transfer.data[8] = crc8_get(req.data.transfer.data, 8, 0x8c, 0);
+
+                                res.data.transfer.dataSize = 9;
+                            }
+                        }
+                        break;
+
                     case PROTO_OW_TRANSFER_TYPE_RESET:
                         {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_RESET]"));
+
+                            for (auto &slave : _owSlaves) {
+                                slave->reset();
+                            }
+
                             res.status = PROTO_OW_STATUS_OK;
                         }
                         break;
@@ -100,7 +146,7 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
 
                             res.data.search.descBit  = 0;
                             res.data.search.lastZero = 0;
-                            res.data.search.romId    = ds1820Ids[0];
+                            res.data.search.romId    = _getOwRomCode(_owSlaves[0]);
                         }
                         break;
 
@@ -114,26 +160,34 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
                             auto owSearchLastZero = req.data.search.lastZero;
                             auto owSearchRn       = req.data.search.romId;
 
-                            if (owSearchLastZero < 5) {
+                            if (owSearchLastZero < _owSlaves.size()) {
                                 owSearchLastZero++;
                                 owSearchDescBit++;
 
-                                owSearchRn = ds1820Ids[owSearchDescBit];
+                                owSearchRn = _getOwRomCode(_owSlaves[owSearchDescBit]);
 
-                                res.status = PROTO_OW_STATUS_SEARCH_STEP;
+                                if (owSearchLastZero == _owSlaves.size() - 1) {
+                                    res.status = PROTO_OW_STATUS_SEARCH_DONE_FOUND;
+
+                                } else {
+                                    res.status = PROTO_OW_STATUS_SEARCH_STEP;
+                                }
+
+                                res.data.search.descBit  = owSearchDescBit;
+                                res.data.search.lastZero = owSearchLastZero;
+                                res.data.search.romId    = owSearchRn;
 
                             } else {
-                                owSearchDescBit  = 0;
-                                owSearchLastZero = 0;
-
-                                owSearchRn = ds1820Ids[5];
-
-                                res.status = PROTO_OW_STATUS_SEARCH_DONE_FOUND;
+                                res.status = PROTO_OW_STATUS_SEARCH_DONE_EMPTY;
                             }
+                        }
+                        break;
 
-                            res.data.search.descBit  = owSearchDescBit;
-                            res.data.search.lastZero = owSearchLastZero;
-                            res.data.search.romId    = owSearchRn;
+                    case PROTO_OW_TRANSFER_TYPE_TOUCH_BIT:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_TOUCH_BIT: {}]", req.data.touchBit.value));
+
+                            res.data.touchBit.value = 1;
                         }
                         break;
                 }
@@ -168,6 +222,12 @@ int main(int argc, char *argv[]) {
     Context ctx;
 
     signal(SIGINT, _intHandler);
+
+    {
+        _owSlaves.emplace_back(std::make_unique<Ds1820>(true, 0x0000112233445500ULL));
+        _owSlaves.emplace_back(std::make_unique<Ds1820>(true, 0x0000112233445501ULL));
+        _owSlaves.emplace_back(std::make_unique<Ds1820>(true, 0x0000112233445502ULL));
+    }
 
     do {
         ctx.ptyMasterFd = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);

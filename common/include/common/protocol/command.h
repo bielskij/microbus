@@ -85,6 +85,7 @@
 #define PROTO_OW_TRANSFER_TYPE_WRITE        (3)
 #define PROTO_OW_TRANSFER_TYPE_SEARCH_START (4)
 #define PROTO_OW_TRANSFER_TYPE_SEARCH_STEP  (5)
+#define PROTO_OW_TRANSFER_TYPE_TOUCH_BIT    (6)
 
 // Read/write cmd results
 #define PROTO_OW_STATUS_OK            0

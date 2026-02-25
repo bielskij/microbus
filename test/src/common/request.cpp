@@ -368,6 +368,29 @@ TEST(common_protocol, request_ow_transfer) {
                     ASSERT_EQ(decoded.request.owTransfer.data.search.descBit,   request.request.owTransfer.data.search.descBit);
                 }
             }
+
+            {
+                t.type = PROTO_OW_TRANSFER_TYPE_TOUCH_BIT;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                request.request.owTransfer.data.touchBit.value = 1;
+
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 2);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.owTransfer.type = request.request.owTransfer.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.owTransfer.type,                request.request.owTransfer.type);
+                    ASSERT_EQ(decoded.request.owTransfer.data.touchBit.value, request.request.owTransfer.data.touchBit.value);
+                }
+            }
         }
     }
 }

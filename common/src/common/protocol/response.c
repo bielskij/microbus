@@ -154,8 +154,16 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
 
                                 ret += PROTO_OW_ROM_ID_SIZE;
 
-                                PTR_U8(memory)[ret++] = t->data.search.descBit;
-                                PTR_U8(memory)[ret++] = t->data.search.lastZero;
+                                if (t->status == PROTO_OW_STATUS_SEARCH_STEP) {
+                                    PTR_U8(memory)[ret++] = t->data.search.descBit;
+                                    PTR_U8(memory)[ret++] = t->data.search.lastZero;
+                                }
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_TOUCH_BIT:
+                            {
+                                PTR_U8(memory)[ret++] = t->data.touchBit.value;
                             }
                             break;
 
@@ -263,6 +271,15 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                             if (t->type == PROTO_OW_TRANSFER_TYPE_READ) {
                                 t->data.transfer.data     = memoryP;
                                 t->data.transfer.dataSize = memorySize;
+
+                            } else if (t->type == PROTO_OW_TRANSFER_TYPE_TOUCH_BIT) {
+                                ret = memorySize > 0;
+                                if (ret) {
+                                    t->data.touchBit.value = *memoryP;
+
+                                    memoryP++;
+                                    memorySize--;
+                                }
                             }
 
                         } else if (
@@ -281,13 +298,15 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                             }
 
                             if (ret) {
-                                ret = memorySize >= 2;
-                                if (ret) {
-                                    t->data.search.descBit   = memoryP[0];
-                                    t->data.search.lastZero  = memoryP[1];
+                                if (t->status == PROTO_OW_STATUS_SEARCH_STEP) {
+                                    ret = memorySize >= 2;
+                                    if (ret) {
+                                        t->data.search.descBit   = memoryP[0];
+                                        t->data.search.lastZero  = memoryP[1];
 
-                                    memoryP    += 2;
-                                    memorySize -= 2;
+                                        memoryP    += 2;
+                                        memorySize -= 2;
+                                    }
                                 }
                             }
                         }

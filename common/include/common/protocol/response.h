@@ -40,6 +40,10 @@ typedef struct _ProtoResOwTransfer {
 
     union {
         struct {
+            uint8_t value;
+        } touchBit;
+
+        struct {
             uint8_t *data;
             uint16_t dataSize;
         } transfer;

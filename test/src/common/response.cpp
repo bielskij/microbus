@@ -286,5 +286,36 @@ TEST(common_protocol, response_ow_transfer) {
                 ASSERT_EQ(decoded.response.owTransfer.data.search.romId,     response.response.owTransfer.data.search.romId);
             }
         }
+
+        {
+            proto_res_init(&response, buffer, sizeof(buffer), PROTO_CMD_OW_TRANSFER);
+
+            response.response.owTransfer.type   = PROTO_OW_TRANSFER_TYPE_TOUCH_BIT;
+            response.response.owTransfer.status = PROTO_OW_STATUS_OK;
+
+            proto_res_assign(&response, buffer, sizeof(buffer));
+
+            response.response.owTransfer.data.touchBit.value = 1;
+
+            bufferWritten = proto_res_encode(&response, buffer, sizeof(buffer));
+            ASSERT_EQ(bufferWritten, 2);
+
+            {
+                ProtoRes decoded;
+
+                proto_res_init(&decoded, nullptr, 0, response.cmd);
+
+                decoded.response.owTransfer.type = response.response.owTransfer.type;
+
+                proto_res_assign(&decoded, buffer, bufferWritten);
+
+                ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
+
+                ASSERT_EQ(decoded.response.owTransfer.status, response.response.owTransfer.status);
+                ASSERT_EQ(decoded.response.owTransfer.type,   response.response.owTransfer.type);
+
+                ASSERT_EQ(decoded.response.owTransfer.data.touchBit.value, response.response.owTransfer.data.touchBit.value);
+            }
+        }
     }
 }

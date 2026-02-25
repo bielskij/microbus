@@ -219,6 +219,8 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
         ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
         ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
 
+        int slaveCount = 0;
+
         req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
         res->type = req->type;
 
@@ -243,6 +245,8 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
                 UBUS_DBG(("[W1] Calling callback with ID: 0x%llx", res->data.search.romId));
 
                 callback(master, res->data.search.romId);
+
+                slaveCount++;
             }
 
             if (! wasLast) {
@@ -254,9 +258,24 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
                 req->data.search.descBit  = res->data.search.descBit;
                 req->data.search.lastZero = res->data.search.lastZero;
                 req->data.search.romId    = res->data.search.romId;
+
+                if (slaveCount == master->max_slave_count && (W1_WARN_MAX_COUNT & master->flags) == 0) {
+                    /* Only max_slave_count will be scanned in a search,
+                    * but it will start where it left off next search
+                    * until all ids are identified and then it will start
+                    * over.  A continued search will report the previous
+                    * last id as the first id (provided it is still on the
+                    * bus).
+                    */
+                    dev_info(&master->dev, "%s: max_slave_count %d reached, will continue next search.\n",
+                        __func__, master->max_slave_count
+                    );
+
+                    set_bit(W1_WARN_MAX_COUNT, &master->flags);
+                }
             }
 
-        } while (! wasLast);
+        } while (! wasLast && (slaveCount < master->max_slave_count));
     }
 }
 
@@ -311,24 +330,53 @@ static u8 _w1ResetBus(void *devData) {
     return ret;
 }
 
-static u8 _w1ReadByte(void *devData) {
-    UbusUart *ubus = (UbusUart *) devData;
-
-    UBUS_TRACE(("[W1]: Reading single byte"));
-
-    return 0;
-}
-
-static void _w1WriteByte(void *devData, u8 byte) {
-    UbusUart *ubus = (UbusUart *) devData;
-
-    UBUS_TRACE(("[W1]: Writing single byte %02x", byte));
-}
-
 static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
     UbusUart *ubus = (UbusUart *) devData;
 
     UBUS_TRACE(("[W1]: Writing block of length %d", bufferLength));
+
+    {
+        int written = 0;
+
+        do {
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            if (cmd == NULL) {
+                break;
+
+            } else {
+                ProtoReqOwTransfer *tx = &cmd->request.request.owTransfer;
+
+                size_t toSendDataSize = min(bufferLength - written, tx->data.transfer.dataSize);
+
+                tx->type = PROTO_OW_TRANSFER_TYPE_WRITE;
+
+                cmd_prepare(ubus, cmd);
+                {
+                    tx->data.transfer.dataSize = toSendDataSize;
+
+                    if (toSendDataSize) {
+                        memcpy(tx->data.transfer.data, buffer + written, toSendDataSize);
+                    }
+                }
+                cmd_enqueue(ubus, cmd);
+                cmd_wait(cmd);
+
+                {
+                    int errorCode = cmd->errorCode;
+
+                    cmd_free(&cmd);
+
+                    if (errorCode == 0) {
+                        written += toSendDataSize;
+
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+        } while (written != bufferLength);
+    }
 }
 
 static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
@@ -336,7 +384,102 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
 
     UBUS_TRACE(("[W1]: Reading block of length %d", bufferLength));
 
-    return 0;
+    {
+        int totalRead = 0;
+
+        do {
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            if (cmd == NULL) {
+                break;
+
+            } else {
+                ProtoReqOwTransfer *tx = &cmd->request.request.owTransfer;
+
+                tx->type = PROTO_OW_TRANSFER_TYPE_READ;
+
+                cmd_prepare(ubus, cmd);
+                {
+                    size_t toReadDataSize = min(bufferLength - totalRead, tx->data.transfer.dataSize);
+
+                    tx->data.transfer.dataSize = toReadDataSize;
+                }
+                cmd_enqueue(ubus, cmd);
+                cmd_wait(cmd);
+
+                {
+                    int errorCode = cmd->errorCode;
+
+                    cmd_free(&cmd);
+
+                    if (errorCode == 0) {
+                        totalRead += tx->data.transfer.dataSize;
+
+                    } else {
+                        break;
+                    }
+                }
+            }
+        } while (totalRead != bufferLength);
+
+        return totalRead;
+    }
+}
+
+static u8 _w1ReadByte(void *devData) {
+    u8 byte = 0;
+
+    UBUS_TRACE(("[W1]: Reading single byte"));
+
+    _w1ReadBlock(devData, &byte, 1);
+
+    return byte;
+}
+
+static void _w1WriteByte(void *devData, u8 byte) {
+    UBUS_TRACE(("[W1]: Writing single byte %02x", byte));
+
+    _w1WriteBlock(devData, &byte, 1);
+}
+
+static u8 _w1TouchBit(void *devData, u8 bit) {
+    u8 ret = 0;
+
+    {
+        UbusUart *ubus = (UbusUart *) devData;
+
+        UBUS_TRACE(("[W1]: touching bit %u", bit));
+
+        {
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            if (cmd) {
+                ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
+
+                t->type = PROTO_OW_TRANSFER_TYPE_TOUCH_BIT;
+
+                t->data.touchBit.value = bit;
+
+                cmd_prepare(ubus, cmd);
+                cmd_enqueue(ubus, cmd);
+                cmd_wait(cmd);
+
+                {
+                    int errorCode = cmd->errorCode;
+
+                    if (errorCode == 0) {
+                        ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
+
+                        if (res->status == PROTO_OW_STATUS_OK) {
+                            ret = t->data.touchBit.value;
+                        }
+                    }
+                }
+
+                cmd_free(&cmd);
+            }
+        }
+    }
+
+    return ret;
 }
 
 static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
@@ -840,6 +983,8 @@ static int _ldiscOpen(struct tty_struct *tty) {
 
             ubus->w1Master.read_block  = _w1ReadBlock;
             ubus->w1Master.write_block = _w1WriteBlock;
+
+            ubus->w1Master.touch_bit   = _w1TouchBit;
 
             ubus->w1Master.reset_bus   = _w1ResetBus;
             ubus->w1Master.search      = _w1Search;
