@@ -27,12 +27,14 @@ class Ds1820 : public OwSlave {
             return this->isB ? 0x28 : 0x10;
         }
 
-        void read(std::vector<uint8_t> &data, size_t dataSize) override {
-            spdlog::debug("read: {}", dataSize);
+        void read(uint8_t *data, size_t dataSize) override {
+            spdlog::debug("ds1820: read: {}", dataSize);
+
+
         }
 
-        void write(const std::vector<uint8_t> &data) override {
-            spdlog::debug("write: {:a16}", spdlog::to_hex(data));
+        void write(const uint8_t *data, size_t dataSize) override {
+            spdlog::debug("ds1820: write: {}", dataSize);
         }
 
         void reset() override {

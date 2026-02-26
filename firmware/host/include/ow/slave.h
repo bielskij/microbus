@@ -13,9 +13,9 @@ class OwSlave {
 
         virtual uint8_t getFamilyCode() const = 0;
 
-        virtual void read(std::vector<uint8_t> &data, size_t dataSize) = 0;
+        virtual void read(uint8_t *data, size_t dataSize) = 0;
 
-        virtual void write(const std::vector<uint8_t> &data) = 0;
+        virtual void write(const uint8_t *data, size_t dataSize) = 0;
 
         virtual void reset() = 0;
 };

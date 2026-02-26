@@ -59,7 +59,7 @@ static uint64_t _getOwRomCode(std::shared_ptr<OwSlave> &slave) {
 
 static uint64_t _getOwRomCode(const uint8_t data[8]) {
     uint64_t ret;
-    
+
     ret  = data[7]; ret <<= 8;
     ret |= data[6]; ret <<= 8;
     ret |= data[5]; ret <<= 8;
@@ -114,10 +114,7 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
                             DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_WRITE {}]", req.data.transfer.dataSize));
 
                             if (_owSlave) {
-                                _owSlave->write(std::vector<uint8_t>(
-                                    req.data.transfer.data, 
-                                    req.data.transfer.data + req.data.transfer.dataSize
-                                ));
+                                _owSlave->write(req.data.transfer.data, req.data.transfer.dataSize);
 
                             } else {
                                 auto *dataPtr  = req.data.transfer.data;
@@ -146,18 +143,13 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
                         {
                             DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_READ {}]", req.data.transfer.dataSize));
 
-                            if (req.data.transfer.dataSize == 9) {
-                                res.data.transfer.data[0] = 0x00;
-                                res.data.transfer.data[1] = 0xa2; // 10.125C
-                                res.data.transfer.data[2] = 0x00;
-                                res.data.transfer.data[3] = 0x00;
-                                res.data.transfer.data[4] = 0x7f;
-                                res.data.transfer.data[5] = 0xff;
-                                res.data.transfer.data[6] = 0x00;
-                                res.data.transfer.data[7] = 0x10;
-                                res.data.transfer.data[8] = crc8_get(res.data.transfer.data, 8, CRC_POLY_OW, 0);
+                            res.data.transfer.dataSize = req.data.transfer.dataSize;
 
-                                res.data.transfer.dataSize = 9;
+                            if (_owSlave) {
+                                _owSlave->read(res.data.transfer.data, res.data.transfer.dataSize);
+
+                            } else {
+                                memset(res.data.transfer.data, 0, res.data.transfer.dataSize);
                             }
                         }
                         break;

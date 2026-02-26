@@ -238,6 +238,50 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
         [](ProtoRes &res) {
             auto &t = res.response.owTransfer;
 
+            t.type   = PROTO_OW_TRANSFER_TYPE_RESET;
+            t.status = PROTO_OW_STATUS_NO_PRESENCE;
+        },
+        [](ProtoRes &res) {
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            ASSERT_EQ(t.status, PROTO_OW_STATUS_NO_PRESENCE);
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            t.type   = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+            t.status = PROTO_OW_STATUS_SEARCH_STEP;
+
+            t.data.search.romId     = 0x8877665544332211ULL;
+            t.data.search.descBit   = 1;
+            t.data.search.lastZero  = 2;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            ASSERT_EQ(t.status, PROTO_OW_STATUS_SEARCH_STEP);
+            ASSERT_EQ(t.type,   PROTO_OW_TRANSFER_TYPE_SEARCH_START);
+
+            ASSERT_EQ(t.data.search.romId,     0x8877665544332211ULL);
+            ASSERT_EQ(t.data.search.descBit,   1);
+            ASSERT_EQ(t.data.search.lastZero,  2);
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
             t.type   = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
             t.status = PROTO_OW_STATUS_SEARCH_STEP;
 
@@ -252,10 +296,84 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
             auto &t = res.response.owTransfer;
 
             ASSERT_EQ(t.status, PROTO_OW_STATUS_SEARCH_STEP);
+            ASSERT_EQ(t.type,   PROTO_OW_TRANSFER_TYPE_SEARCH_STEP);
 
             ASSERT_EQ(t.data.search.romId,     0x8877665544332211ULL);
             ASSERT_EQ(t.data.search.descBit,   1);
             ASSERT_EQ(t.data.search.lastZero,  2);
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            t.type   = PROTO_OW_TRANSFER_TYPE_READ;
+            t.status = PROTO_OW_STATUS_OK;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            t.data.transfer.dataSize = 256;
+
+            for (uint16_t i = 0; i < t.data.transfer.dataSize; i++) {
+                t.data.transfer.data[i] = i;
+            }
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            ASSERT_EQ(t.status, PROTO_OW_STATUS_OK);
+            ASSERT_EQ(t.type,   PROTO_OW_TRANSFER_TYPE_READ);
+
+            ASSERT_EQ(t.data.transfer.dataSize, 256);
+
+            for (uint16_t i = 0; i < t.data.transfer.dataSize; i++) {
+                ASSERT_EQ(t.data.transfer.data[i], i);
+            }
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            t.type   = PROTO_OW_TRANSFER_TYPE_WRITE;
+            t.status = PROTO_OW_STATUS_OK;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            ASSERT_EQ(t.status, PROTO_OW_STATUS_OK);
+            ASSERT_EQ(t.type,   PROTO_OW_TRANSFER_TYPE_WRITE);
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            t.type   = PROTO_OW_TRANSFER_TYPE_TOUCH_BIT;
+            t.status = PROTO_OW_STATUS_OK;
+
+            t.data.touchBit.value = 1;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.owTransfer;
+
+            ASSERT_EQ(t.status, PROTO_OW_STATUS_OK);
+            ASSERT_EQ(t.type,   PROTO_OW_TRANSFER_TYPE_TOUCH_BIT);
+
+            ASSERT_EQ(t.data.touchBit.value, 1);
         }
     }
 ));
