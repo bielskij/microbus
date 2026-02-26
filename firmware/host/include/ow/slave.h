@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdint>
 
+#define CRC_POLY_OW 0x8C
 class OwSlave {
     public:
         virtual ~OwSlave() = default;

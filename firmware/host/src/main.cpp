@@ -24,8 +24,6 @@
 #define DBG(x) spdlog::debug x;
 #define ERR(x) spdlog::error x;
 
-#define CRC_POLY_OW 0x8C
-
 struct Context {
     int         ptyMasterFd;
     std::string ptyMasterPath;
@@ -266,9 +264,9 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, _intHandler);
 
     {
-        _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445500ULL));
-        _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445501ULL));
-        _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445502ULL));
+        _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445500ULL, -10.876));
+        _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445501ULL, 22.1234));
+        _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445502ULL, 12.1256));
     }
 
     do {

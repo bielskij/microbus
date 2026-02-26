@@ -222,7 +222,6 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
         int slaveCount = 0;
 
         req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
-        res->type = req->type;
 
         bool wasLast = false;
         do {
@@ -253,7 +252,6 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
                 cmd = cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
 
                 req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
-                res->type = req->type;
 
                 req->data.search.descBit  = res->data.search.descBit;
                 req->data.search.lastZero = res->data.search.lastZero;
@@ -347,7 +345,6 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
                 ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
 
                 req->type = PROTO_OW_TRANSFER_TYPE_WRITE;
-                res->type = req->type;
 
                 cmd_prepare(ubus, cmd);
 
@@ -401,7 +398,6 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
                 ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
 
                 req->type = PROTO_OW_TRANSFER_TYPE_READ;
-                res->type = req->type;
 
                 cmd_prepare(ubus, cmd);
 
@@ -421,12 +417,14 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
 
                         if (cmd->errorCode == 0) {
                             uint16_t readSize = res->data.transfer.dataSize;
-UBUS_ERR(("TYPE: %u, %u", res->status, res->type));
+
                             if (readSize == 0) {
                                 UBUS_WARN(("Received 0 bytes instead of expected %u - interrupting", req->data.transfer.dataSize));
 
                                 break;
                             }
+
+                            memcpy(buffer + totalRead, res->data.transfer.data, readSize);
 
                             totalRead += readSize;
 
