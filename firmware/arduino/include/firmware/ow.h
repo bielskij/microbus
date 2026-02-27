@@ -24,11 +24,11 @@ typedef enum _OwDelay {
     OW_DELAY_PRESENCE_END,
 } OwDelay;
 
-typedef void (*OwDelayCallback)(OwDelay delay);
-typedef void (*OwPioDirCallback)(bool in, bool hi);
-typedef bool (*OwPioValueCallback)();
+// | LOWUS | READUS | SAMPLE | HIUS |
+// -_______--------------------------
+typedef bool (*OwPioCallback)(uint16_t lowUs, uint16_t readUs, uint16_t hiUs);
 
-void ow_initialize(OwDelayCallback delayCallback, OwPioDirCallback pioDirCallback, OwPioValueCallback pioValueCallback);
+void ow_initialize(OwPioCallback pioCallback);
 
 void ow_terminate(void);
 

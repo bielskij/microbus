@@ -3,38 +3,19 @@
 
 #include "firmware/ow.h"
 
-static OwDelayCallback    delayCallback    = NULL;
-static OwPioDirCallback   pioDirCallback   = NULL;
-static OwPioValueCallback pioValueCallback = NULL;
+static OwPioCallback pioCallback = NULL;
 
 static void _writeBit(uint8_t bit) {
-	pioDirCallback(false, false); // out-lo
+	if (bit) {
+		pioCallback(64, 0, 6);
 
-	delayCallback(bit ? OW_DELAY_TX_1_LO : OW_DELAY_TX_0_LO);
-	{
-		pioDirCallback(true, true); // in-hi
+	} else {
+		pioCallback(10, 0, 60);
 	}
-	delayCallback(bit ? OW_DELAY_TX_1_HI : OW_DELAY_TX_0_HI);
 }
 
 static uint8_t _readBit() {
-	uint8_t ret = 0;
-
-	pioDirCallback(false, false); // out-lo
-
-	delayCallback(OW_DELAY_RX_LO);
-	{
-		pioDirCallback(true, true); // in-hi
-	}
-	delayCallback(OW_DELAY_RX_HI);
-	{
-		if (pioValueCallback()) {
-			ret = 1;
-		}
-	}
-	delayCallback(OW_DELAY_RX_END);
-
-	return ret;
+	return pioCallback(6, 9, 55);
 }
 
 static uint8_t _triplet(bool bdir) {
@@ -62,30 +43,16 @@ static uint8_t _triplet(bool bdir) {
 	return ret;
 }
 
-void ow_initialize(OwDelayCallback delayCallback, OwPioDirCallback pioDirCallback, OwPioValueCallback pioValueCallback) {
-	delayCallback    = delayCallback;
-	pioDirCallback   = pioDirCallback;
-	pioValueCallback = pioValueCallback;
+void ow_initialize(OwPioCallback _pioCallback) {
+	pioCallback = _pioCallback;
 }
 
 void ow_terminate(void) {
-	delayCallback = NULL;
+	pioCallback = NULL;
 }
 
 bool ow_presence(void) {
-	bool ret;
-
-	pioDirCallback(false, false); // OUT, LO
-	delayCallback(OW_DELAY_PRESENCE_LO);
-
-	pioDirCallback(true, true); // IN, PULL-UP
-	delayCallback(OW_DELAY_PRESENCE_HI);
-
-	ret = ! pioValueCallback();
-
-	delayCallback(OW_DELAY_PRESENCE_END);
-
-	return ret;
+	return pioCallback(480, 70, 410);
 }
 
 bool ow_search_start(uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast) {

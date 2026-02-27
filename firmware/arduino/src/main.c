@@ -181,55 +181,69 @@ static void _ubusResponseCallback(uint8_t *buffer, uint16_t bufferSize, void *ca
     }
 }
 
-static uint16_t _owDelays[] = {
-     6, // OW_DELAY_TX_1_HI
-    64, // OW_DELAY_TX_1_LO
-    60, // OW_DELAY_TX_0_HI
-    10, // OW_DELAY_TX_0_LO
+#define TIMER_PRESCALLER 8
 
-     6, // OW_DELAY_RX_LO
-     9, // OW_DELAY_RX_HI
-    55, // OW_DELAY_RX_END
+#if ((F_CPU / TIMER_PRESCALLER) % 1000000UL) != 0
+    #error "Timer prescaler does not produce an integer number of ticks per microsecond"
+#else
+    #define TIMER_TICKS_PER_US ((F_CPU / TIMER_PRESCALLER) / 1000000UL)
+#endif
 
-   490, // OW_DELAY_PRESENCE_LO
-    70, // OW_DELAY_PRESENCE_HI
-   410  // OW_DELAY_PRESENCE_END
-};
+#if TIMER_TICKS_PER_US == 0
+    #error "TIMER_TICKS_PER_US evaluates to 0 - check F_CPU and TIMER_PRESCALER"
+#endif
 
-static inline void _delayUs(uint16_t us) {
-    uint32_t cycles = (uint32_t) us * (F_CPU / 1000000UL);
-    uint16_t loops  = cycles / 4;
+#if TIMER_TICKS_PER_US == 0
+    #define TIMER_TICKS_PER_US_SHIFT 0
+#elif TIMER_TICKS_PER_US == 2
+    #define TIMER_TICKS_PER_US_SHIFT 1
+#elif TIMER_TICKS_PER_US == 4
+    #define TIMER_TICKS_PER_US_SHIFT 2
+#elif TIMER_TICKS_PER_US == 8
+    #define TIMER_TICKS_PER_US_SHIFT 3
+#elif TIMER_TICKS_PER_US == 16
+    #define TIMER_TICKS_PER_US_SHIFT 4
+#else
+    #define TIMER_TICKS_PER_US_SHIFT -1
+#endif
 
-    __asm__ volatile (
-        "1: sbiw %0, 1" "\n\t"
-        "brne 1b"
-        : "=w" (loops)
-        : "0" (loops)
-    );
+static void _timerWait(uint16_t delayUs) {
+    uint16_t current = TCNT1;
+
+#if TIMER_TICKS_PER_US_SHIFT >= 0
+    delayUs <<= TIMER_TICKS_PER_US_SHIFT;
+#else
+    delayUs *= TIMER_TICKS_PER_US;
+#endif
+
+    uint16_t target = current + delayUs;
+
+    while (((int16_t) (TCNT1 - target)) < 0);
 }
 
-static void _owDelayCallback(OwDelay delay) {
-    _delayUs(_owDelays[delay]);
-}
+static bool _owPioCallback(uint16_t lowUs, uint16_t readUs, uint16_t hiUs) {
+    bool ret;
 
-static void _owPioDirCallback(bool in, bool hi) {
-    if (hi) {
-        PIO_SET_HIGH(OW_PIO_BANK, OW_PIO_PIN);
+    // LO
+    PIO_SET_LOW   (OW_PIO_BANK, OW_PIO_PIN);
+    PIO_SET_OUTPUT(OW_PIO_BANK, OW_PIO_PIN);
 
-    } else {
-        PIO_SET_LOW(OW_PIO_BANK, OW_PIO_PIN);
+    _timerWait(lowUs);
+
+    PIO_SET_INPUT(OW_PIO_BANK, OW_PIO_PIN);
+    PIO_SET_HIGH (OW_PIO_BANK, OW_PIO_PIN);
+
+    if (readUs) {
+        _timerWait(readUs);
     }
 
-    if (in) {
-        PIO_SET_INPUT(OW_PIO_BANK, OW_PIO_PIN);
+    ret = PIO_IS_HIGH(OW_PIO_BANK, OW_PIO_PIN);
 
-    } else {
-        PIO_SET_OUTPUT(OW_PIO_BANK, OW_PIO_PIN);
+    if (hiUs) {
+        _timerWait(hiUs);
     }
-}
 
-static bool _owPioValueCallback() {
-    return PIO_IS_HIGH(OW_PIO_BANK, OW_PIO_PIN);
+    return ret;
 }
 
 int main(int argc, char *argv[]) {
@@ -242,11 +256,20 @@ int main(int argc, char *argv[]) {
         PIO_SET_INPUT(OW_PIO_BANK, OW_PIO_PIN);
         PIO_SET_HIGH(OW_PIO_BANK, OW_PIO_PIN);
 
-        ow_initialize(
-            _owDelayCallback,
-            _owPioDirCallback,
-            _owPioValueCallback
-        );
+        ow_initialize(_owPioCallback);
+
+        // Initialize timer
+        {
+            TCNT1 = 0;
+
+#if TIMER_PRESCALLER == 1
+            TCCR1B = _BV(CS10);
+#elif TIMER_PRESCALLER == 8
+            TCCR1B = _BV(CS11) | _BV(CS10);
+#else
+    #error "Prescaller value is not supported"
+#endif
+        }
     }
 
     ubus_hub_setup(
