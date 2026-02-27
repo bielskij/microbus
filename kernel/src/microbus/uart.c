@@ -10,6 +10,9 @@
 #include <linux/mutex.h>
 #include <linux/list.h>
 
+#include <linux/cdev.h>
+#include <linux/device.h>
+
 #include "common/protocol.h"
 #include "common/protocol/packet/decoder.h"
 #include "common/protocol/command.h"
@@ -105,6 +108,9 @@ typedef struct _UbusUart {
     struct i2c_adapter   i2cAdapter;
     struct w1_bus_master w1Master;
     char                 w1MasterId[64];
+    dev_t                w1MasterCharDev;
+    struct cdev          w1MasterCharCdev;
+    struct class        *w1MasterClass;
 } UbusUart;
 
 static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
@@ -653,6 +659,44 @@ static const struct i2c_algorithm _ubusI2cAlgo = {
     .functionality = _i2cFunctionality,
 };
 
+static int _w1DevOpen(struct inode *inode, struct file *file) {
+    UBUS_DBG(("CALL"));
+    
+    file->private_data = container_of(inode->i_cdev, UbusUart, w1MasterCharCdev);
+    
+    return 0;
+}
+
+static int _w1DevRelease(struct inode *inode, struct file *file) {
+    UBUS_DBG(("CALL"));
+    
+    file->private_data = NULL;
+    
+    return 0;
+}
+
+static long _w1DevIoctl(struct file *file, unsigned int, unsigned long) {
+    UBUS_DBG(("CALL"));
+
+    return 0;
+}
+
+static char *_w1DevNode(const struct device *dev, umode_t *mode) {
+    if (mode) {
+        *mode = 0666;
+    }
+
+    return NULL;
+}
+
+static const struct file_operations _ubusW1Fops = {
+    .owner = THIS_MODULE,
+
+    .open           = _w1DevOpen,
+    .release        = _w1DevRelease,
+    .unlocked_ioctl = _w1DevIoctl
+};
+
 static void _sendPacket(UbusUart *ubus, ProtoPkt *pkt) {
     // TODO: Handle errors!
     ubus->tty->ops->write(ubus->tty, pkt->header,  pkt->headerUsed);
@@ -785,6 +829,48 @@ static int _workerRoutine(void *arg) {
 
                             } else {
                                 ubus->w1Master.data = NULL;
+                            }
+
+                            if (ret == 0) {
+                                ret = alloc_chrdev_region(&ubus->w1MasterCharDev, 0, 1, "microbus_ow");
+                                if (ret != 0) {
+                                    UBUS_ERR(("Can't get major number for new w1 device"));
+
+                                } else {
+                                    cdev_init(&ubus->w1MasterCharCdev, &_ubusW1Fops);
+
+                                    ubus->w1MasterCharCdev.owner = THIS_MODULE;
+
+                                    ret = cdev_add(&ubus->w1MasterCharCdev, ubus->w1MasterCharDev, 1);
+                                    if (ret != 0) {
+                                        UBUS_ERR(("Can't add cdev device for w1"));
+
+                                        unregister_chrdev_region(ubus->w1MasterCharDev, 1);
+
+                                    } else {
+                                        ubus->w1MasterClass = class_create("microbus_ow");
+                                        
+                                        // sets proper rights on device node
+                                        ubus->w1MasterClass->devnode = _w1DevNode;
+                                        
+                                        if (IS_ERR(ubus->w1MasterClass)) {
+                                            UBUS_ERR(("Failed to create w1 class"));
+
+                                            cdev_del(&ubus->w1MasterCharCdev);
+                                            unregister_chrdev_region(ubus->w1MasterCharDev, 1);
+
+                                        } else {
+                                            struct device *dev = device_create(ubus->w1MasterClass, NULL, ubus->w1MasterCharDev, ubus, "microbus_ow");
+                                            if (IS_ERR(dev)) {
+                                                UBUS_ERR(("Failed to create w1 device"));
+
+                                                class_destroy(ubus->w1MasterClass);
+                                                cdev_del(&ubus->w1MasterCharCdev);
+                                                unregister_chrdev_region(ubus->w1MasterCharDev, 1);
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -932,6 +1018,11 @@ static void _ldiscCleanup(UbusUart **ubus) {
 
     if (b->w1Master.data != NULL) {
         w1_remove_master_device(&b->w1Master);
+
+        device_destroy(b->w1MasterClass, b->w1MasterCharDev);
+        class_destroy(b->w1MasterClass);
+        cdev_del(&b->w1MasterCharCdev);
+        unregister_chrdev_region(b->w1MasterCharDev, 1);
     }
 
     if (b->worker) {
