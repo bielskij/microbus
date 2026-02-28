@@ -38,24 +38,10 @@ bool ow_search_start(uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool 
 
 bool ow_search_step(uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast);
 
-void ow_byte_write(uint8_t byte);
+void ow_write(const uint8_t *data, uint16_t dataSize);
 
-// bool ow_detectPresence(void);
+void ow_read(uint8_t *data, uint16_t dataSize);
 
-// _U8 bus_1wire_byteRead(void);
-
-// void bus_1wire_byteWrite(_U8 byte);
-
-// // Identification
-// void bus_1wire_romRead(_U8 rom[8]);
-
-// // Address specific device
-// void bus_1wire_romMatch(_U8 rom[8]);
-
-// // Skip addressing
-// void bus_1wire_romSkip(void);
-
-// // Obtain IDs of all devices on the bus
-// _BOOL bus_1wire_romSearch(_U8 rom[8], _BOOL *isLast);
+bool ow_read_bit(void);
 
 #endif /* DRV_BUS_1WIRE_H_ */

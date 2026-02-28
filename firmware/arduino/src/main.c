@@ -166,6 +166,26 @@ static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *ca
 
                         }
                         break;
+
+                    case PROTO_OW_TRANSFER_TYPE_READ:
+                        {
+                            res->data.transfer.dataSize = req->data.transfer.dataSize;
+
+                            ow_read(res->data.transfer.data, res->data.transfer.dataSize);
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_WRITE:
+                        {
+                            ow_write(req->data.transfer.data, req->data.transfer.dataSize);
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_TOUCH_BIT:
+                        {
+                            res->data.touchBit.value = ow_read_bit();
+                        }
+                        break;
                 }
             }
             break;
@@ -265,7 +285,7 @@ int main(int argc, char *argv[]) {
 #if TIMER_PRESCALLER == 1
             TCCR1B = _BV(CS10);
 #elif TIMER_PRESCALLER == 8
-            TCCR1B = _BV(CS11) | _BV(CS10);
+            TCCR1B = _BV(CS11);
 #else
     #error "Prescaller value is not supported"
 #endif
