@@ -34,9 +34,9 @@ void ow_terminate(void);
 
 bool ow_presence(void);
 
-bool ow_search_start(uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast);
+bool ow_search_start(uint8_t searchType, uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast);
 
-bool ow_search_step(uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast);
+bool ow_search_step(uint8_t searchType, uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast);
 
 void ow_write(const uint8_t *data, uint16_t dataSize);
 

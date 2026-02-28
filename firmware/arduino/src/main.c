@@ -132,6 +132,7 @@ static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *ca
 
                                 if (req->type == PROTO_OW_TRANSFER_TYPE_SEARCH_START) {
                                     searchRet = ow_search_start(
+                                        req->data.search.type,
                                         &res->data.search.romId,
                                         &res->data.search.descBit,
                                         &res->data.search.lastZero,
@@ -144,6 +145,7 @@ static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *ca
                                     res->data.search.lastZero = req->data.search.lastZero;
 
                                     searchRet = ow_search_step(
+                                        req->data.search.type,
                                         &res->data.search.romId,
                                         &res->data.search.descBit,
                                         &res->data.search.lastZero,

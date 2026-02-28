@@ -76,24 +76,24 @@ bool ow_presence(void) {
 	return ! pioCallback(480, 70, 410);
 }
 
-bool ow_search_start(uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast) {
+bool ow_search_start(uint8_t searchType, uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast) {
 	*romId = 0;
 
 	*descBit  = 64;
 	*lastZero = -1;
 	*wasLast  = false;
 
-	return ow_search_step(romId, descBit, lastZero, wasLast);
+	return ow_search_step(searchType, romId, descBit, lastZero, wasLast);
 }
 
 // Search algoritm implementation inspired by u-boot/v2025.01/source/drivers/w1/w1-uclass.c
-bool ow_search_step(uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast) {
+bool ow_search_step(uint8_t searchType, uint64_t *romId, uint8_t *descBit, uint8_t *lastZero, bool *wasLast) {
 	uint64_t lastRomId = *romId;
 	uint8_t  searchBit = 0;
 	uint8_t  tripletRet;
 	uint64_t tmp;
 
-	_writeByte(OW_SEARCH);
+	_writeByte(searchType);
 
 	*romId = 0;
 

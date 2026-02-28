@@ -157,6 +157,13 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
 
                                 PTR_U8(memory)[ret++] = t->data.search.descBit;
                                 PTR_U8(memory)[ret++] = t->data.search.lastZero;
+                                PTR_U8(memory)[ret++] = t->data.search.type;
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_SEARCH_START:
+                            {
+                                PTR_U8(memory)[ret++] = t->data.search.type;
                             }
                             break;
 
@@ -288,10 +295,23 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                                         if (ret) {
                                             t->data.search.descBit   = memoryP[0];
                                             t->data.search.lastZero  = memoryP[1];
+                                            t->data.search.type      = memoryP[2];
 
-                                            memoryP    += 2;
-                                            memorySize -= 2;
+                                            memoryP    += 3;
+                                            memorySize -= 3;
                                         }
+                                    }
+                                }
+                                break;
+
+                            case PROTO_OW_TRANSFER_TYPE_SEARCH_START:
+                                {
+                                    ret = memorySize >= 1;
+                                    if (ret) {
+                                        t->data.search.type = memoryP[0];
+
+                                        memoryP++;
+                                        memorySize--;
                                     }
                                 }
                                 break;

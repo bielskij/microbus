@@ -39,6 +39,7 @@ typedef struct _ProtoReqOwTransfer {
             uint64_t romId;
             uint8_t  descBit;
             uint8_t  lastZero;
+            uint8_t  type;
         } search;
     } data;
 } ProtoReqOwTransfer;

@@ -327,7 +327,9 @@ TEST(common_protocol, request_ow_transfer) {
 
                 proto_req_assign(&request, buffer, sizeof(buffer));
 
-                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 1);
+                t.data.search.type = 0xf0;
+
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 2);
 
                 {
                     ProtoReq decoded;
@@ -338,7 +340,8 @@ TEST(common_protocol, request_ow_transfer) {
 
                     ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
 
-                    ASSERT_EQ(decoded.request.owTransfer.type, request.request.owTransfer.type);
+                    ASSERT_EQ(decoded.request.owTransfer.type,             request.request.owTransfer.type);
+                    ASSERT_EQ(decoded.request.owTransfer.data.search.type, request.request.owTransfer.data.search.type);
                 }
             }
 
@@ -350,8 +353,9 @@ TEST(common_protocol, request_ow_transfer) {
                 request.request.owTransfer.data.search.romId     = 0x1122334455667788ULL;
                 request.request.owTransfer.data.search.lastZero  = 1;
                 request.request.owTransfer.data.search.romId     = 2;
+                request.request.owTransfer.data.search.type      = 0xf0;
 
-                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 11);
+                ASSERT_EQ(proto_req_encode(&request, buffer, sizeof(buffer)), 12);
 
                 {
                     ProtoReq decoded;
@@ -362,10 +366,11 @@ TEST(common_protocol, request_ow_transfer) {
 
                     ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
 
-                    ASSERT_EQ(decoded.request.owTransfer.type,                      request.request.owTransfer.type);
+                    ASSERT_EQ(decoded.request.owTransfer.type,                  request.request.owTransfer.type);
                     ASSERT_EQ(decoded.request.owTransfer.data.search.romId,     request.request.owTransfer.data.search.romId);
                     ASSERT_EQ(decoded.request.owTransfer.data.search.lastZero,  request.request.owTransfer.data.search.lastZero);
                     ASSERT_EQ(decoded.request.owTransfer.data.search.descBit,   request.request.owTransfer.data.search.descBit);
+                    ASSERT_EQ(decoded.request.owTransfer.data.search.type,      request.request.owTransfer.data.search.type);
                 }
             }
 

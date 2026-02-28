@@ -227,7 +227,8 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
 
         int slaveCount = 0;
 
-        req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+        req->type             = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+        req->data.search.type = searchType;
 
         bool wasLast = false;
         do {
@@ -259,6 +260,7 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
 
                 req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
 
+                req->data.search.type     = searchType;
                 req->data.search.descBit  = res->data.search.descBit;
                 req->data.search.lastZero = res->data.search.lastZero;
                 req->data.search.romId    = res->data.search.romId;
@@ -345,7 +347,7 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
         UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
         if (cmd != NULL) {
             int totalWritten = 0;
-            
+
             do {
                 ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
                 ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
@@ -359,7 +361,7 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
 
                     if (toSendDataSize == 0) {
                         UBUS_WARN(("Read buffer too small - aborting"));
-                        
+
                         break;
 
                     } else {
@@ -412,7 +414,7 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
 
                     if (toReadDataSize == 0) {
                         UBUS_WARN(("Read buffer too small - aborting"));
-                        
+
                         break;
 
                     } else {
@@ -661,17 +663,17 @@ static const struct i2c_algorithm _ubusI2cAlgo = {
 
 static int _w1DevOpen(struct inode *inode, struct file *file) {
     UBUS_DBG(("CALL"));
-    
+
     file->private_data = container_of(inode->i_cdev, UbusUart, w1MasterCharCdev);
-    
+
     return 0;
 }
 
 static int _w1DevRelease(struct inode *inode, struct file *file) {
     UBUS_DBG(("CALL"));
-    
+
     file->private_data = NULL;
-    
+
     return 0;
 }
 
@@ -849,10 +851,10 @@ static int _workerRoutine(void *arg) {
 
                                     } else {
                                         ubus->w1MasterClass = class_create("microbus_ow");
-                                        
+
                                         // sets proper rights on device node
                                         ubus->w1MasterClass->devnode = _w1DevNode;
-                                        
+
                                         if (IS_ERR(ubus->w1MasterClass)) {
                                             UBUS_ERR(("Failed to create w1 class"));
 
