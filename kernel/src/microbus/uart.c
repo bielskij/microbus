@@ -25,6 +25,10 @@
 #define DEBUG_LEVEL_DBG   4
 #define DEBUG_LEVEL_TRACE 5
 
+static bool search_enable = true;
+module_param(search_enable, bool, 0644);
+MODULE_PARM_DESC(search_enable, "Enable automatic 1-Wire device search (default: enabled)");
+
 static int debug = DEBUG_LEVEL_LOG;
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "Debug level (1=ERR, 2=WARN, 3=LOG, 4=DBG, 5=TRC)");
@@ -214,7 +218,7 @@ static int cmd_wait(UbusCmd *cmd) {
     return 0;
 }
 
-static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1_slave_found_callback callback) {
+static void _w1SearchImpl(void *devData, struct w1_master *master, u8 searchType, w1_slave_found_callback callback) {
     UbusUart *ubus = (UbusUart *) devData;
 
     UBUS_TRACE(("[W1]: Search type: %02x", searchType));
@@ -282,6 +286,12 @@ static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1
             }
 
         } while (! wasLast && (slaveCount < master->max_slave_count));
+    }
+}
+
+static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1_slave_found_callback callback) {
+    if (search_enable) {
+        _w1SearchImpl(devData, master, searchType, callback);
     }
 }
 
