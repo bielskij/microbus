@@ -725,7 +725,7 @@ static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long 
 
                     if (ioctlCmd == MICROBUS_IOC_SEARCH_START) {
                         req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
-                    
+
                     } else {
                         req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
 
@@ -742,7 +742,7 @@ static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long 
 
                     if (res->status != PROTO_OW_STATUS_SEARCH_STEP) {
                         step.wasLast = true;
-                        
+
                     } else {
                         step.wasLast = false;
                     }
@@ -763,7 +763,7 @@ static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long 
 
                     cmd_free(&cmd);
                 }
-                
+
                 if (copy_to_user((void __user *) arg, &step, sizeof(step))) {
                     return -EFAULT;
                 }
@@ -782,12 +782,70 @@ static char *_w1DevNode(const struct device *dev, umode_t *mode) {
     return NULL;
 }
 
+static ssize_t _w1DevRead(struct file *file, char __user *data, size_t size, loff_t *ppos) {
+    ssize_t ret = size;
+
+    {
+        UbusUart *ubus = (UbusUart *) file->private_data;
+
+        UBUS_DBG(("CALL buffer %p, size: %zd", data, size));
+
+        *ppos = 0;
+
+        if (size > 0) {
+            u8 *kernelBuffer = kmalloc(size, GFP_KERNEL);
+            if (kernelBuffer != NULL) {
+                _w1ReadBlock(ubus, kernelBuffer, size);
+
+                if (copy_to_user(data, kernelBuffer, size)) {
+                    ret = -EFAULT;
+                }
+
+                kfree(kernelBuffer);
+            }
+        }
+    }
+
+    return ret;
+}
+
+static ssize_t _w1DevWrite(struct file *file, const char __user *data, size_t size, loff_t *ppos) {
+    ssize_t ret = size;
+
+    {
+        UbusUart *ubus = (UbusUart *) file->private_data;
+
+        UBUS_DBG(("CALL buffer %p, size: %zd", data, size));
+
+        *ppos = 0;
+
+        if (size > 0) {
+            u8 *kernelBuffer = kmalloc(size, GFP_KERNEL);
+            if (kernelBuffer != NULL) {
+                if (copy_from_user(kernelBuffer, data, size)) {
+                    ret = -EFAULT;
+
+                } else {
+                    _w1WriteBlock(ubus, kernelBuffer, size);
+                }
+
+                kfree(kernelBuffer);
+            }
+        }
+    }
+
+    return ret;
+}
+
 static const struct file_operations _ubusW1Fops = {
     .owner = THIS_MODULE,
 
     .open           = _w1DevOpen,
+    .unlocked_ioctl = _w1DevIoctl,
+    .read           = _w1DevRead,
+    .write          = _w1DevWrite,
     .release        = _w1DevRelease,
-    .unlocked_ioctl = _w1DevIoctl
+    .llseek         = noop_llseek
 };
 
 static void _sendPacket(UbusUart *ubus, ProtoPkt *pkt) {
