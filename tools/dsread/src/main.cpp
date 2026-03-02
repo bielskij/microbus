@@ -14,7 +14,7 @@ int main(int argc, char *argv[]) {
 
     if (argc != 2) {
         spdlog::error("Device number not provided. Please specify the 1-Wire device number.");
-        
+
         ret = 1;
 
     } else {
@@ -22,7 +22,7 @@ int main(int argc, char *argv[]) {
         int fd = -1;
         do {
             std::string path = "/dev/ow-";
-            
+
             path += std::string(argv[1]);
 
             fd = open(path.c_str(), O_RDWR);
@@ -92,7 +92,70 @@ int main(int argc, char *argv[]) {
                 }
 
                 for (auto rn : sensors) {
+                    std::vector<uint8_t> cmd;
 
+                    {
+                        __u8 presence;
+
+                        ioctl(fd, MICROBUS_IOC_RESET, &presence);
+                    }
+
+                    cmd.push_back(0x55);
+                    cmd.push_back((rn >>  0) & 0xff);
+                    cmd.push_back((rn >>  8) & 0xff);
+                    cmd.push_back((rn >> 16) & 0xff);
+                    cmd.push_back((rn >> 24) & 0xff);
+                    cmd.push_back((rn >> 32) & 0xff);
+                    cmd.push_back((rn >> 40) & 0xff);
+                    cmd.push_back((rn >> 48) & 0xff);
+                    cmd.push_back((rn >> 56) & 0xff);
+
+                    if (write(fd, cmd.data(), cmd.size()) != cmd.size()) {
+                        spdlog::error("error {}", strerror(errno));
+                    }
+
+                    cmd.clear();
+                    cmd.push_back(0x44);
+                    if (write(fd, cmd.data(), cmd.size()) != cmd.size()) {
+                        spdlog::error("error {}", strerror(errno));
+                    }
+
+                    sleep(1);
+
+                    {
+                        __u8 presence;
+
+                        ioctl(fd, MICROBUS_IOC_RESET, &presence);
+                    }
+
+                    cmd.push_back(0x55);
+                    cmd.push_back((rn >>  0) & 0xff);
+                    cmd.push_back((rn >>  8) & 0xff);
+                    cmd.push_back((rn >> 16) & 0xff);
+                    cmd.push_back((rn >> 24) & 0xff);
+                    cmd.push_back((rn >> 32) & 0xff);
+                    cmd.push_back((rn >> 40) & 0xff);
+                    cmd.push_back((rn >> 48) & 0xff);
+                    cmd.push_back((rn >> 56) & 0xff);
+
+                    if (write(fd, cmd.data(), cmd.size()) != cmd.size()) {
+                        spdlog::error("error {}", strerror(errno));
+                    }
+
+                    cmd.clear();
+                    cmd.push_back(0xbe);
+                    if (write(fd, cmd.data(), cmd.size()) != cmd.size()) {
+                        spdlog::error("error {}", strerror(errno));
+                    }
+
+                    cmd.resize(9);
+                    if (read(fd, cmd.data(), cmd.size()) != cmd.size()) {
+                        spdlog::error("read error {}", strerror(errno));
+                    }
+
+                    for (int i = 0; i < cmd.size(); i++) {
+                        spdlog::debug("{:x}", cmd.at(i));
+                    }
                 }
             }
         } while (0);
