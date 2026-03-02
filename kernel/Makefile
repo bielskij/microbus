@@ -11,7 +11,7 @@ $(MODULE_NAME)-objs := \
 	../common/src/common/protocol/packet/decoder.o \
 	../common/src/common/protocol/common.o
 
-ccflags-y += -I$(PWD)/../common/include
+ccflags-y += -I$(PWD)/../common/include -I$(PWD)/include
 # ccflags-y += -fsanitize=kernel-address
 
 KDIR := /lib/modules/$(shell uname -r)/build

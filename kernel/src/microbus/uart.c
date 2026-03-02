@@ -19,15 +19,17 @@
 #include "common/protocol/request.h"
 #include "common/protocol/response.h"
 
+#include "microbus/ioctl.h"
+
 #define DEBUG_LEVEL_ERROR 1
 #define DEBUG_LEVEL_WARN  2
 #define DEBUG_LEVEL_LOG   3
 #define DEBUG_LEVEL_DBG   4
 #define DEBUG_LEVEL_TRACE 5
 
-static bool search_enable = true;
-module_param(search_enable, bool, 0644);
-MODULE_PARM_DESC(search_enable, "Enable automatic 1-Wire device search (default: enabled)");
+static int search_enable = 1;
+module_param(search_enable, int, 0644);
+MODULE_PARM_DESC(search_enable, "Enable automatic 1-Wire device search (1 - enabled, 0 - disabled, default: 1)");
 
 static int debug = DEBUG_LEVEL_LOG;
 module_param(debug, int, 0644);
@@ -352,15 +354,12 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
     UBUS_TRACE(("[W1]: Writing block of length %d", bufferLength));
 
     if (bufferLength > 0) {
-        UbusUart *ubus = (UbusUart *) devData;
-
         UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
         if (cmd != NULL) {
             int totalWritten = 0;
 
             do {
                 ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
-                ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
 
                 req->type = PROTO_OW_TRANSFER_TYPE_WRITE;
 
@@ -687,8 +686,90 @@ static int _w1DevRelease(struct inode *inode, struct file *file) {
     return 0;
 }
 
-static long _w1DevIoctl(struct file *file, unsigned int, unsigned long) {
+static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long arg) {
+    UbusUart *ubus = (UbusUart *) file->private_data;
+
     UBUS_DBG(("CALL"));
+
+    if (_IOC_TYPE(ioctlCmd) != MICROBUS_IOC_MAGIC) {
+        return -ENOTTY;
+    }
+
+    switch (ioctlCmd) {
+        case MICROBUS_IOC_RESET:
+            {
+                __u8 presence;
+
+                presence = _w1ResetBus(ubus);
+
+                if (copy_to_user((__u8 __user *) arg, &presence, sizeof(presence))) {
+                    return -EFAULT;
+                }
+            }
+            break;
+
+        case MICROBUS_IOC_SEARCH_START:
+        case MICROBUS_IOC_SEARCH_STEP:
+            {
+                struct MicrobusSearchStep step;
+
+                if (copy_from_user(&step, (void __user *) arg, sizeof(step))) {
+                    return -EFAULT;
+                }
+
+                {
+                    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+
+                    ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
+                    ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
+
+                    if (ioctlCmd == MICROBUS_IOC_SEARCH_START) {
+                        req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+                    
+                    } else {
+                        req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
+
+                        req->data.search.descBit  = step.descBit;
+                        req->data.search.lastZero = step.lastZero;
+                        req->data.search.romId    = step.rn;
+                    }
+
+                    req->data.search.type = step.type;
+
+                    cmd_prepare(ubus, cmd);
+                    cmd_enqueue(ubus, cmd);
+                    cmd_wait(cmd);
+
+                    if (res->status != PROTO_OW_STATUS_SEARCH_STEP) {
+                        step.wasLast = true;
+                        
+                    } else {
+                        step.wasLast = false;
+                    }
+
+                    if (
+                        (res->status == PROTO_OW_STATUS_SEARCH_DONE_FOUND) ||
+                        (res->status == PROTO_OW_STATUS_SEARCH_STEP)
+                    ) {
+                        step.found = true;
+
+                    } else {
+                        step.found = false;
+                    }
+
+                    step.descBit  = res->data.search.descBit;
+                    step.lastZero = res->data.search.lastZero;
+                    step.rn       = res->data.search.romId;
+
+                    cmd_free(&cmd);
+                }
+                
+                if (copy_to_user((void __user *) arg, &step, sizeof(step))) {
+                    return -EFAULT;
+                }
+            }
+            break;
+    }
 
     return 0;
 }
@@ -872,7 +953,7 @@ static int _workerRoutine(void *arg) {
                                             unregister_chrdev_region(ubus->w1MasterCharDev, 1);
 
                                         } else {
-                                            struct device *dev = device_create(ubus->w1MasterClass, NULL, ubus->w1MasterCharDev, ubus, "microbus_ow");
+                                            struct device *dev = device_create(ubus->w1MasterClass, NULL, ubus->w1MasterCharDev, ubus, "ow-%d", MINOR(ubus->w1MasterCharDev));
                                             if (IS_ERR(dev)) {
                                                 UBUS_ERR(("Failed to create w1 device"));
 
