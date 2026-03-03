@@ -29,6 +29,7 @@ sudo insmod microbus_uart.ko
 
 The kernel module accepts the following parameters:
   * ``debug`` - Debug level (1=ERR, 2=WARN, 3=LOG, 4=DBG, 5=TRC)
+  * ``search_enable`` - Enable automatic 1-Wire device search (1 - enabled, 0 - disabled, default: 1)
 
 ### Binding the UART Interface to microbus
 
