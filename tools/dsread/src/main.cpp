@@ -1,11 +1,49 @@
 #include <string>
 #include <cerrno>
 
+#include <sys/ioctl.h>
 #include <spdlog/spdlog.h>
 
-#include <sys/ioctl.h>
-
 #include "microbus/ioctl.h"
+#include "common/crc8.h"
+
+static bool sendReset(int fd) {
+    __u8 presence = 0;
+
+    if (ioctl(fd, MICROBUS_IOC_RESET, &presence) != 0) {
+        spdlog::error("ioctl(RESET) failed on fd {}: {}", fd, strerror(errno));
+
+    } else if (presence == 0) {
+        return true;
+
+    } else {
+        spdlog::info("OW slave not present on fd {}, presence code: {}", fd, presence);
+    }
+
+    return false;
+}
+
+static bool sendMatchRom(int fd, uint64_t rn) {
+    uint8_t data[9];
+
+    data[0] = 0x55;
+    data[1] = ((rn >>  0) & 0xff);
+    data[2] = ((rn >>  8) & 0xff);
+    data[3] = ((rn >> 16) & 0xff);
+    data[4] = ((rn >> 24) & 0xff);
+    data[5] = ((rn >> 32) & 0xff);
+    data[6] = ((rn >> 40) & 0xff);
+    data[7] = ((rn >> 48) & 0xff);
+    data[8] = ((rn >> 56) & 0xff);
+
+    if (write(fd, data, sizeof(data)) != sizeof(data)) {
+        spdlog::error("Write to OW slave failed on fd {}: {}", fd, strerror(errno));
+
+        return false;
+    }
+
+    return true;
+}
 
 int main(int argc, char *argv[]) {
     int ret = 0;
@@ -34,15 +72,7 @@ int main(int argc, char *argv[]) {
             }
 
             {
-                __u8 presence;
-
-                ioctl(fd, MICROBUS_IOC_RESET, &presence);
-
-                if (presence == 1 || presence < 0) {
-                    spdlog::info("No device has reported the presence after reset pulse - exiting");
-
-                    break;
-                }
+                sendReset(fd);
 
                 std::vector<uint64_t> sensors;
 
@@ -59,19 +89,19 @@ int main(int argc, char *argv[]) {
 
                         switch (familyCode) {
                             case 0x10:
-                                spdlog::debug("Detected DS1820/DS18S20 ({:X})", step.rn);
+                                spdlog::debug("Detected DS18(S)20 ({:X})", step.rn);
                                 break;
 
                             case 0x28:
-                                spdlog::debug("Detected DS18B20 ({:X})", step.rn);
+                                spdlog::debug("Detected DS18B20   ({:X})", step.rn);
                                 break;
 
                             case 0x22:
-                                spdlog::debug("Detected DS1822 ({:X})", step.rn);
+                                spdlog::debug("Detected DS1822    ({:X})", step.rn);
                                 break;
 
                             case 0x3B:
-                                spdlog::debug("Detected DS1825 ({:X})", step.rn);
+                                spdlog::debug("Detected DS1825    ({:X})", step.rn);
                                 break;
 
                             default:
@@ -92,69 +122,52 @@ int main(int argc, char *argv[]) {
                 }
 
                 for (auto rn : sensors) {
-                    std::vector<uint8_t> cmd;
+                    sendReset(fd);
+                    sendMatchRom(fd, rn);
 
                     {
-                        __u8 presence;
+                        uint8_t convertCmd = 0x44;
 
-                        ioctl(fd, MICROBUS_IOC_RESET, &presence);
-                    }
-
-                    cmd.push_back(0x55);
-                    cmd.push_back((rn >>  0) & 0xff);
-                    cmd.push_back((rn >>  8) & 0xff);
-                    cmd.push_back((rn >> 16) & 0xff);
-                    cmd.push_back((rn >> 24) & 0xff);
-                    cmd.push_back((rn >> 32) & 0xff);
-                    cmd.push_back((rn >> 40) & 0xff);
-                    cmd.push_back((rn >> 48) & 0xff);
-                    cmd.push_back((rn >> 56) & 0xff);
-
-                    if (write(fd, cmd.data(), cmd.size()) != cmd.size()) {
-                        spdlog::error("error {}", strerror(errno));
-                    }
-
-                    cmd.clear();
-                    cmd.push_back(0x44);
-                    if (write(fd, cmd.data(), cmd.size()) != cmd.size()) {
-                        spdlog::error("error {}", strerror(errno));
+                        if (write(fd, &convertCmd, 1) != 1) {
+                           spdlog::error("Write failed on fd {}: {}", fd, strerror(errno));
+                           
+                           continue;
+                        }
                     }
 
                     sleep(1);
 
+                    sendReset(fd);
+                    sendMatchRom(fd, rn);
+
                     {
-                        __u8 presence;
+                        uint8_t readScratchpadCmd = 0xbe;
 
-                        ioctl(fd, MICROBUS_IOC_RESET, &presence);
+                        if (write(fd, &readScratchpadCmd, 1) != 1) {
+                           spdlog::error("Write failed on fd {}: {}", fd, strerror(errno));
+                           
+                           continue;
+                        }
                     }
 
-                    cmd.push_back(0x55);
-                    cmd.push_back((rn >>  0) & 0xff);
-                    cmd.push_back((rn >>  8) & 0xff);
-                    cmd.push_back((rn >> 16) & 0xff);
-                    cmd.push_back((rn >> 24) & 0xff);
-                    cmd.push_back((rn >> 32) & 0xff);
-                    cmd.push_back((rn >> 40) & 0xff);
-                    cmd.push_back((rn >> 48) & 0xff);
-                    cmd.push_back((rn >> 56) & 0xff);
+                    {
+                        uint8_t scratchPad[9];
 
-                    if (write(fd, cmd.data(), cmd.size()) != cmd.size()) {
-                        spdlog::error("error {}", strerror(errno));
-                    }
+                        if (read(fd, scratchPad, sizeof(scratchPad)) != sizeof(scratchPad)) {
+                           spdlog::error("read failed on fd {}: {}", fd, strerror(errno));
 
-                    cmd.clear();
-                    cmd.push_back(0xbe);
-                    if (write(fd, cmd.data(), cmd.size()) != cmd.size()) {
-                        spdlog::error("error {}", strerror(errno));
-                    }
+                           continue;
+                        }
 
-                    cmd.resize(9);
-                    if (read(fd, cmd.data(), cmd.size()) != cmd.size()) {
-                        spdlog::error("read error {}", strerror(errno));
-                    }
+                        uint8_t crcReceived   = scratchPad[8];
+                        uint8_t crcCalculated = crc8_get(scratchPad, 8, 0x8C, 0);
+                        if (crcReceived != crcCalculated) {
+                            spdlog::error("CRC8 mismatch: received=0x{:02X}, calculated=0x{:02X}", crcReceived, crcCalculated);
 
-                    for (int i = 0; i < cmd.size(); i++) {
-                        spdlog::debug("{:x}", cmd.at(i));
+                            continue;
+                        }
+
+                        spdlog::info("[{:016X}] Temperature: {:.2f}°C", rn, ((int16_t)(scratchPad[1] << 8) | scratchPad[0]) / 16.0f);
                     }
                 }
             }
