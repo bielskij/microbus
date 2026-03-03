@@ -41,6 +41,27 @@ void proto_req_init(ProtoReq *request, void *memory, uint16_t memorySize, uint8_
 
                 t->data.transfer.dataSize = memorySize - 1;
             }
+            break;
+
+        case PROTO_CMD_SPI_TRANSFER:
+            {
+                ProtoReqSpiTransfer *t = &request->request.spiTransfer;
+
+                uint8_t overhead = 7;
+
+                if (memorySize > 7) {
+                    t->txBufferSize = memorySize - overhead;
+
+                } else {
+                    t->txBufferSize = 0;
+                }
+
+                t->txBuffer     = NULL;
+                t->rxBufferSize = 0;
+                t->rxBufferSize = 0;
+                t->rxSkipSize   = 0;
+            }
+            break;
 
         default:
             break;
@@ -96,6 +117,19 @@ void proto_req_assign(ProtoReq *request, void *memory, uint16_t memorySize) {
 
                     default:
                         break;
+                }
+            }
+            break;
+
+        case PROTO_CMD_SPI_TRANSFER:
+            {
+                ProtoReqSpiTransfer *t = &request->request.spiTransfer;
+
+                if (t->txBufferSize) {
+                    t->txBuffer = PTR_U8(memory) + (1 + proto_int_val_length_estimate(t->txBufferSize));
+
+                } else {
+                    t->txBuffer = NULL;
                 }
             }
             break;
@@ -188,6 +222,21 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
                         default:
                             break;
                     }
+                }
+                break;
+
+            case PROTO_CMD_SPI_TRANSFER:
+                {
+                    ProtoReqSpiTransfer *t = &request->request.spiTransfer;
+
+                    PTR_U8(memory)[ret++] = t->flags;
+
+                    ret += proto_int_val_encode(t->txBufferSize, PTR_U8(memory) + ret);
+
+                    ret += t->txBufferSize;
+
+                    ret += proto_int_val_encode(t->rxSkipSize,   PTR_U8(memory) + ret);
+                    ret += proto_int_val_encode(t->rxBufferSize, PTR_U8(memory) + ret);
                 }
                 break;
 
@@ -347,6 +396,65 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                                     memorySize--;
                                 }
                                 break;
+                        }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_SPI_TRANSFER:
+                {
+                    ProtoReqSpiTransfer *t = &request->request.spiTransfer;
+
+                    ret = memorySize > 0;
+                    if (ret) {
+                        t->flags = *memoryP;
+
+                        memoryP++;
+                        memorySize--;
+                    }
+
+                    {
+                        uint8_t lenSize = proto_int_val_length_probe(*memoryP);
+
+                        ret = lenSize <= memorySize;
+                        if (ret) {
+                            t->txBuffer     = NULL;
+                            t->txBufferSize = proto_int_val_decode(memoryP);
+
+                            memoryP    += lenSize;
+                            memorySize -= lenSize;
+
+                            ret = t->txBufferSize <= memorySize;
+                            if (ret) {
+                                t->txBuffer = memoryP;
+
+                                memoryP    += t->txBufferSize;
+                                memorySize -= t->txBufferSize;
+                            }
+                        }
+
+                        if (ret) {
+                            lenSize = proto_int_val_length_probe(*memoryP);
+
+                            ret = lenSize <= memorySize;
+                            if (ret) {
+                                t->rxSkipSize = proto_int_val_decode(memoryP);
+
+                                memoryP    += lenSize;
+                                memorySize -= lenSize;
+                            }
+                        }
+
+                        if (ret) {
+                            lenSize = proto_int_val_length_probe(*memoryP);
+
+                            ret = lenSize <= memorySize;
+                            if (ret) {
+                                t->rxBufferSize = proto_int_val_decode(memoryP);
+
+                                memoryP    += lenSize;
+                                memorySize -= lenSize;
+                            }
                         }
                     }
                 }

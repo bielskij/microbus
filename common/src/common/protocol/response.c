@@ -53,6 +53,18 @@ void proto_res_init(ProtoRes *response, void *memory, uint16_t memorySize, uint8
             }
             break;
 
+        case PROTO_CMD_SPI_TRANSFER:
+            {
+                ProtoResSpiTransfer *t = &response->response.spiTransfer;
+
+                if (memorySize) {
+                    t->rxBufferSize = memorySize - 1;
+                }
+
+                t->rxBuffer = NULL;
+            }
+            break;
+
         default:
             break;
     }
@@ -90,6 +102,19 @@ void proto_res_assign(ProtoRes *response, void *memory, uint16_t memorySize) {
                 } else if (t->type == PROTO_OW_TRANSFER_TYPE_WRITE) {
                     t->data.transfer.data     = NULL;
                     t->data.transfer.dataSize = 0;
+                }
+            }
+            break;
+
+        case PROTO_CMD_SPI_TRANSFER:
+            {
+                ProtoResSpiTransfer *t = &response->response.spiTransfer;
+
+                if (t->rxBufferSize) {
+                    t->rxBuffer = PTR_U8(memory);
+
+                } else {
+                    t->rxBuffer = NULL;
                 }
             }
             break;
@@ -170,6 +195,14 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                         default:
                             break;
                     }
+                }
+                break;
+
+            case PROTO_CMD_SPI_TRANSFER:
+                {
+                    ProtoResSpiTransfer *t = &response->response.spiTransfer;
+
+                    ret += t->rxBufferSize;
                 }
                 break;
 
@@ -310,6 +343,15 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                             }
                         }
                     }
+                }
+                break;
+
+            case PROTO_CMD_SPI_TRANSFER:
+                {
+                    ProtoResSpiTransfer *t = &response->response.spiTransfer;
+
+                    t->rxBuffer     = NULL;
+                    t->rxBufferSize = memorySize;
                 }
                 break;
 

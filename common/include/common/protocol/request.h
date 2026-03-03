@@ -44,6 +44,16 @@ typedef struct _ProtoReqOwTransfer {
     } data;
 } ProtoReqOwTransfer;
 
+typedef struct _ProtoReqSpiTransfer {
+    uint8_t *txBuffer;
+    uint16_t txBufferSize;
+
+    uint16_t rxBufferSize;
+    uint16_t rxSkipSize;
+
+    uint8_t flags;
+} ProtoReqSpiTransfer;
+
 typedef struct _ProtoReq {
     uint8_t cmd;
 
@@ -51,6 +61,7 @@ typedef struct _ProtoReq {
         ProtoReqGetInfo     getInfo;
         ProtoReqI2CTransfer i2cTransfer;
         ProtoReqOwTransfer  owTransfer;
+        ProtoReqSpiTransfer spiTransfer;
     } request;
 } ProtoReq;
 

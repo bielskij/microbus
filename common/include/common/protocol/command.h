@@ -98,5 +98,15 @@
 #define PROTO_OW_STATUS_SEARCH_DONE_EMPTY  3
 #define PROTO_OW_STATUS_SEARCH_DONE_FOUND  4
 
+/*
+ * 4) CMD_SPI_TRANSFER
+ *
+ * [  1B   ][  1/2B   ][    TX_SIZE     ][     1/2B     ][  1/2B   ]
+ * [ FLAGS ][ TX_SIZE ][ TX_DATA ][ ... ][ RX_SKIP_SIZE ][ RX_SIZE ]
+ */
+
+#define PROTO_CMD_SPI_TRANSFER  0x3
+
+#define PROTO_SPI_TRANSFER_FLAG_KEEP_CS (1 << 0)
 
 #endif /* FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_ */

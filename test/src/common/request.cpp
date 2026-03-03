@@ -399,3 +399,66 @@ TEST(common_protocol, request_ow_transfer) {
         }
     }
 }
+
+TEST(common_protocol, request_spi_transfer) {
+    uint8_t buffer[64];
+
+    uint16_t bufferWritten;
+
+    {
+        ProtoReq request;
+
+        proto_req_init(&request, buffer, sizeof(buffer), PROTO_CMD_SPI_TRANSFER);
+
+        ASSERT_EQ(request.cmd, PROTO_CMD_SPI_TRANSFER);
+
+        {
+            ProtoReqSpiTransfer &t = request.request.spiTransfer;
+
+            ASSERT_EQ(t.flags,        0);
+            ASSERT_EQ(t.txBuffer,     nullptr);
+            ASSERT_EQ(t.txBufferSize, 57);
+            ASSERT_EQ(t.rxBufferSize, 0);
+            ASSERT_EQ(t.rxSkipSize,   0);
+        }
+    }
+
+    // flags check
+    {
+        ProtoReq request;
+
+        proto_req_init(&request, buffer, sizeof(buffer), PROTO_CMD_SPI_TRANSFER);
+
+        {
+            ProtoReqSpiTransfer &t = request.request.spiTransfer;
+
+            {
+                t.flags = PROTO_SPI_TRANSFER_FLAG_KEEP_CS;
+
+                t.rxBufferSize = 128;
+                t.rxSkipSize   = 128;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                ASSERT_EQ(t.txBufferSize, 57);
+
+                bufferWritten = proto_req_encode(&request, buffer, sizeof(buffer));
+                ASSERT_EQ(bufferWritten, 63);
+
+                {
+                    ProtoReq decoded;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.spiTransfer.flags,        request.request.spiTransfer.flags);
+                    ASSERT_EQ(decoded.request.spiTransfer.rxBufferSize, request.request.spiTransfer.rxBufferSize);
+                    ASSERT_EQ(decoded.request.spiTransfer.rxSkipSize,   request.request.spiTransfer.rxSkipSize);
+                    ASSERT_EQ(decoded.request.spiTransfer.txBuffer,     request.request.spiTransfer.txBuffer);
+                    ASSERT_EQ(decoded.request.spiTransfer.txBufferSize, request.request.spiTransfer.txBufferSize);
+                }
+            }
+        }
+    }
+}
