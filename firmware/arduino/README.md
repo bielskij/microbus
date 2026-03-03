@@ -1,5 +1,10 @@
 # Arduino firmware
 
+Arduino pin configuration:
+ - **PC0** (A0): 1-Wire bus
+ - **PC4**: I²C SDA
+ - **PC5**: I²C SCL
+
 ## Compilation
 
 ### Envronment preparation

@@ -44,6 +44,15 @@ void proto_res_init(ProtoRes *response, void *memory, uint16_t memorySize, uint8
             }
             break;
 
+        case PROTO_CMD_OW_TRANSFER:
+            {
+                ProtoResOwTransfer *t = &response->response.owTransfer;
+
+                t->status = PROTO_OW_STATUS_OK;
+                t->type   = PROTO_OW_TRANSFER_TYPE_UNKNOWN;
+            }
+            break;
+
         default:
             break;
     }
@@ -64,8 +73,23 @@ void proto_res_assign(ProtoRes *response, void *memory, uint16_t memorySize) {
                     }
 
                 } else {
-                    t->rxBuffer     = 0;
+                    t->rxBuffer     = NULL;
                     t->rxBufferSize = 0;
+                }
+            }
+            break;
+
+        case PROTO_CMD_OW_TRANSFER:
+            {
+                ProtoResOwTransfer *t = &response->response.owTransfer;
+
+                if (t->type == PROTO_OW_TRANSFER_TYPE_READ) {
+                    t->data.transfer.data     = PTR_U8(memory) + 1;
+                    t->data.transfer.dataSize = memorySize - 1;
+
+                } else if (t->type == PROTO_OW_TRANSFER_TYPE_WRITE) {
+                    t->data.transfer.data     = NULL;
+                    t->data.transfer.dataSize = 0;
                 }
             }
             break;
@@ -99,6 +123,53 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                     PTR_U8(memory)[ret++] = t->status;
 
                     ret += t->rxBufferSize;
+                }
+                break;
+
+            case PROTO_CMD_OW_TRANSFER:
+                {
+                    ProtoResOwTransfer *t = &response->response.owTransfer;
+
+                    PTR_U8(memory)[ret++] = ((t->status & 0x0f) << 4) | (t->type & 0x0f);
+
+                    switch (t->type) {
+                        case PROTO_OW_TRANSFER_TYPE_READ:
+                            {
+                                ret += t->data.transfer.dataSize;
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
+                        case PROTO_OW_TRANSFER_TYPE_SEARCH_START:
+                            if (
+                                (t->status == PROTO_OW_STATUS_SEARCH_DONE_FOUND) ||
+                                (t->status == PROTO_OW_STATUS_SEARCH_STEP)
+                            ) {
+                                uint64_t romId = t->data.search.romId;
+
+                                for (uint8_t i = 0; i < PROTO_OW_ROM_ID_SIZE; i++) {
+                                    PTR_U8(memory)[ret + i] = romId;
+                                    romId >>= 8;
+                                }
+
+                                ret += PROTO_OW_ROM_ID_SIZE;
+
+                                if (t->status == PROTO_OW_STATUS_SEARCH_STEP) {
+                                    PTR_U8(memory)[ret++] = t->data.search.descBit;
+                                    PTR_U8(memory)[ret++] = t->data.search.lastZero;
+                                }
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_TOUCH_BIT:
+                            {
+                                PTR_U8(memory)[ret++] = t->data.touchBit.value;
+                            }
+                            break;
+
+                        default:
+                            break;
+                    }
                 }
                 break;
 
@@ -178,6 +249,65 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                         if (t->status == PROTO_I2C_STATUS_OK) {
                             t->rxBufferSize = memorySize;
                             t->rxBuffer     = memoryP;
+                        }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_OW_TRANSFER:
+                {
+                    ProtoResOwTransfer *t = &response->response.owTransfer;
+
+                    ret = memorySize != 0;
+                    if (ret) {
+                        t->status = *memoryP >> 4;
+                        t->type   = *memoryP & 0x0f;
+
+                        memoryP++;
+                        memorySize--;
+                    }
+
+                    if (ret) {
+                        if (t->status == PROTO_OW_STATUS_OK) {
+                            if (t->type == PROTO_OW_TRANSFER_TYPE_READ) {
+                                t->data.transfer.data     = memoryP;
+                                t->data.transfer.dataSize = memorySize;
+
+                            } else if (t->type == PROTO_OW_TRANSFER_TYPE_TOUCH_BIT) {
+                                ret = memorySize > 0;
+                                if (ret) {
+                                    t->data.touchBit.value = *memoryP;
+
+                                    memoryP++;
+                                    memorySize--;
+                                }
+                            }
+
+                        } else if (
+                            (t->status == PROTO_OW_STATUS_SEARCH_STEP) ||
+                            (t->status == PROTO_OW_STATUS_SEARCH_DONE_FOUND)
+                        ) {
+                            ret = memorySize >= PROTO_OW_ROM_ID_SIZE;
+                            if (ret) {
+                                for (uint8_t i = PROTO_OW_ROM_ID_SIZE; i > 0; i--) {
+                                    t->data.search.romId <<= 8;
+                                    t->data.search.romId |= memoryP[i - 1];
+                                }
+
+                                memoryP    += PROTO_OW_ROM_ID_SIZE;
+                                memorySize -= PROTO_OW_ROM_ID_SIZE;
+
+                                if (t->status == PROTO_OW_STATUS_SEARCH_STEP) {
+                                    ret = memorySize >= 2;
+                                    if (ret) {
+                                        t->data.search.descBit   = memoryP[0];
+                                        t->data.search.lastZero  = memoryP[1];
+
+                                        memoryP    += 2;
+                                        memorySize -= 2;
+                                    }
+                                }
+                            }
                         }
                     }
                 }

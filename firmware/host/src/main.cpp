@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Jarosław Bielski <bielski.j@gmail.com>
 
+#include <vector>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -14,9 +15,13 @@
 
 #include "firmware/ubus.h"
 
+#include "ow/slave.h"
+#include "ow/slave/ds1820.h"
+
+#include "common/crc8.h"
 #include "common/protocol/command.h"
 
-#define DBG(x) spdlog::info x;
+#define DBG(x) spdlog::debug x;
 #define ERR(x) spdlog::error x;
 
 struct Context {
@@ -35,17 +40,45 @@ static uint8_t        packetBuffer[packetSize];
 
 static volatile bool interrupted = false;
 
+static std::vector<std::shared_ptr<OwSlave>> _owSlaves;
+static std::shared_ptr<OwSlave>              _owSlave;
+
+static uint64_t _getOwRomCode(uint8_t familyCode, uint64_t sn) {
+    uint64_t ret = (sn << 8) | familyCode;
+
+    ret |= ((uint64_t) crc8_get((uint8_t *) &ret, 7, CRC_POLY_OW, 0) << 56);
+
+    return ret;
+}
+
+static uint64_t _getOwRomCode(std::shared_ptr<OwSlave> &slave) {
+    return _getOwRomCode(slave->getFamilyCode(), slave->getSerialNumber());
+}
+
+static uint64_t _getOwRomCode(const uint8_t data[8]) {
+    uint64_t ret;
+
+    ret  = data[7]; ret <<= 8;
+    ret |= data[6]; ret <<= 8;
+    ret |= data[5]; ret <<= 8;
+    ret |= data[4]; ret <<= 8;
+    ret |= data[3]; ret <<= 8;
+    ret |= data[2]; ret <<= 8;
+    ret |= data[1]; ret <<= 8;
+    ret |= data[0];
+
+    return ret;
+}
+
 static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void *callbackData) {
     auto *ctx = reinterpret_cast<Context *>(callbackData);
-
-    DBG(("CALL"));
 
     switch (request->cmd) {
         case PROTO_CMD_GET_INFO:
             {
                 DBG(("PROTO_CMD_GET_INFO"));
 
-                response->response.getInfo.features |= PROTO_FEATURE_I2C;
+                response->response.getInfo.features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW;
             }
             break;
 
@@ -54,7 +87,7 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
                 auto &t = request->request.i2cTransfer;
 
                 DBG(("PROTO_CMD_I2C_TRANSFER {}-{:x} | {}: {} | {}",
-                    t.flags & PROTO_I2C_TRANSFER_FLAG_START ? "STA" : 
+                    t.flags & PROTO_I2C_TRANSFER_FLAG_START ? "STA" :
                         t.flags & PROTO_I2C_TRANSFER_FLAG_REPEATED_START ? "RSTA" : "-",
                     t.flags & (PROTO_I2C_TRANSFER_FLAG_START | PROTO_I2C_TRANSFER_FLAG_REPEATED_START) ? t.slaveAddress : 0,
                     t.flags & PROTO_I2C_TRANSFER_FLAG_READ ? 'R' : 'W',
@@ -64,6 +97,137 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
 
                 if (! (t.flags & PROTO_I2C_TRANSFER_FLAG_READ)) {
                     spdlog::info("Data to write {:a16}", spdlog::to_hex(t.data, t.data + t.dataSize));
+                }
+            }
+            break;
+
+        case PROTO_CMD_OW_TRANSFER:
+            {
+                auto &req = request->request.owTransfer;
+                auto &res = response->response.owTransfer;
+
+                switch (req.type) {
+                    case PROTO_OW_TRANSFER_TYPE_WRITE:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_WRITE {}]", req.data.transfer.dataSize));
+
+                            if (_owSlave) {
+                                _owSlave->write(req.data.transfer.data, req.data.transfer.dataSize);
+
+                            } else {
+                                auto *dataPtr  = req.data.transfer.data;
+                                auto  dataSize = req.data.transfer.dataSize;
+
+                                if (dataSize > 0) {
+                                    // Match ROM
+                                    if (dataPtr[0] == 0x55) {
+                                        auto expectedRomId = _getOwRomCode(dataPtr + 1);
+
+                                        DBG(("Received Match ROM command with ROM code {:x}", expectedRomId));
+
+                                        for (auto &slave : _owSlaves) {
+                                            if (_getOwRomCode(slave) == expectedRomId) {
+                                                _owSlave = slave;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_READ:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_READ {}]", req.data.transfer.dataSize));
+
+                            res.data.transfer.dataSize = req.data.transfer.dataSize;
+
+                            if (_owSlave) {
+                                _owSlave->read(res.data.transfer.data, res.data.transfer.dataSize);
+
+                            } else {
+                                memset(res.data.transfer.data, 0, res.data.transfer.dataSize);
+                            }
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_RESET:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_RESET]"));
+
+                            for (auto &slave : _owSlaves) {
+                                slave->reset();
+                            }
+
+                            _owSlave.reset();
+
+                            res.status = PROTO_OW_STATUS_OK;
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_SEARCH_START:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_SEARCH_START]"));
+
+                            if (_owSlaves.empty()) {
+                                res.status = PROTO_OW_STATUS_SEARCH_DONE_EMPTY;
+
+                            } else {
+                                res.data.search.descBit  = 1;
+                                res.data.search.lastZero = 1;
+                                res.data.search.romId    = _getOwRomCode(_owSlaves[0]);
+
+                                if (_owSlaves.size() > 1) {
+                                    res.status = PROTO_OW_STATUS_SEARCH_STEP;
+
+                                } else {
+                                    res.status = PROTO_OW_STATUS_SEARCH_DONE_FOUND;
+                                }
+                            }
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_SEARCH_STEP: {}, {}, {:x}]",
+                                req.data.search.descBit, req.data.search.lastZero, req.data.search.romId
+                            ));
+
+                            auto owSearchDescBit  = req.data.search.descBit;
+                            auto owSearchLastZero = req.data.search.lastZero;
+                            auto owSearchRn       = req.data.search.romId;
+
+                            if (owSearchLastZero < _owSlaves.size()) {
+                                owSearchRn = _getOwRomCode(_owSlaves[owSearchDescBit]);
+
+                                owSearchLastZero++;
+                                owSearchDescBit++;
+
+                                if (owSearchDescBit == _owSlaves.size()) {
+                                    res.status = PROTO_OW_STATUS_SEARCH_DONE_FOUND;
+
+                                } else {
+                                    res.status = PROTO_OW_STATUS_SEARCH_STEP;
+                                }
+
+                                res.data.search.descBit  = owSearchDescBit;
+                                res.data.search.lastZero = owSearchLastZero;
+                                res.data.search.romId    = owSearchRn;
+
+                            } else {
+                                res.status = PROTO_OW_STATUS_SEARCH_DONE_EMPTY;
+                            }
+                        }
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_TOUCH_BIT:
+                        {
+                            DBG(("PROTO_CMD_OW_TRANSFER [PROTO_OW_TRANSFER_TYPE_TOUCH_BIT: {}]", req.data.touchBit.value));
+
+                            res.data.touchBit.value = 1;
+                        }
+                        break;
                 }
             }
             break;
@@ -91,11 +255,19 @@ static void _intHandler(int signo) {
 }
 
 int main(int argc, char *argv[]) {
+    spdlog::set_level(spdlog::level::debug);
+
     DBG(("START"));
 
     Context ctx;
 
     signal(SIGINT, _intHandler);
+
+    {
+        _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445500ULL, -10.876));
+        _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445501ULL, 22.1234));
+        _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445502ULL, 12.1256));
+    }
 
     do {
         ctx.ptyMasterFd = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);

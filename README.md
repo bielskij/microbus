@@ -13,7 +13,8 @@ The project is currently **under active development**, and not all planned featu
 Microbus consists of two main components:
 
 - **Linux kernel module**
-  - Exposes embedded buses through the Linux device model (/dev/i2c-X, /dev/spi)
+  - Exposes embedded buses through the Linux device model (`/dev/i2c-X`, `/dev/spi`)
+    - Creates custom `/dev/ow-X` devices for 1-Wire buses to enable raw communication with slave devices
   - [Compilation and Module Usage](kernel/README.md)
 - **Target firmware**
   - Runs on a microcontroller
@@ -29,7 +30,7 @@ This architecture allows Linux applications to interact with embedded peripheral
 | Protocol | Status |
 |--------|--------|
 | I²C | ✅ Supported |
-| 1-Wire | 🚧 Planned |
+| 1-Wire | ✅ Supported |
 | SPI | 🚧 Planned |
 
 ---
@@ -70,6 +71,9 @@ Please refer to:
 ---
 
 ## Example Use Cases
+
+## I²C
+---
 
 * Assumptions
   * System environment
@@ -146,6 +150,24 @@ sudo bash -c "echo tsl2561 0x39 > /sys/bus/i2c/devices/i2c-${I2C_DEV_NO}/new_dev
 cat /sys/bus/iio/devices/iio\:device0/in_illuminance0_input 
 ```
 
+## 1Wire
+---
+### Assumptions
+  * Kernel modules
+    * ``wire`` module is loaded 
+        ```bash
+        sudo modprobe wire
+        ```
+    * ``w1-therm`` module is loaded (1-wire thermal sensors)
+        ```bash
+        sudo modprobe w1-therm
+        ```
+### Listing master devices
+```bash
+ls  /sys/bus/w1/devices/
+
+28-112233445500  28-112233445501  28-112233445502  w1_bus_master1
+``` 
 ---
 
 ## Project Status

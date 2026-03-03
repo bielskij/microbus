@@ -58,13 +58,13 @@ static std::vector<uint8_t> genCmd(uint8_t cmd, uint8_t id, std::function<void(P
 
 TEST_P(RequestDecoderTestWithParameter, common_protocol) {
     auto data = genCmd(
-        GetParam().cmd, 1, 
+        GetParam().cmd, 1,
         [](ProtoReq &res) {
             auto &f = GetParam().prepareReq;
             if (f) {
                 f(res);
             }
-        }, 
+        },
         [](ProtoReq &res) {
             auto &f = GetParam().fillReq;
             if (f) {
@@ -298,7 +298,7 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
             ASSERT_EQ(t.slaveAddress, 0);
             ASSERT_EQ(t.flags,        0);
             ASSERT_NE(t.data,         nullptr);
-            
+
             for (uint16_t i = 0; i < t.dataSize; i++) {
                 ASSERT_EQ(t.data[i], i);
             }
@@ -334,6 +334,138 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
                 ASSERT_EQ(t.data[i], i);
             }
         },
+    },
+
+    // OW reset
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.type = PROTO_OW_TRANSFER_TYPE_RESET;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_RESET);
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_SEARCH_START);
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
+
+            t.data.search.romId     = 0x8877665544332211ULL;
+            t.data.search.descBit   = 1;
+            t.data.search.lastZero  = 2;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_SEARCH_STEP);
+
+            ASSERT_EQ(t.data.search.romId,     0x8877665544332211ULL);
+            ASSERT_EQ(t.data.search.descBit,   1);
+            ASSERT_EQ(t.data.search.lastZero,  2);
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.type = PROTO_OW_TRANSFER_TYPE_READ;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.data.transfer.dataSize = 256;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_READ);
+
+            ASSERT_EQ(t.data.transfer.dataSize, 256);
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.type = PROTO_OW_TRANSFER_TYPE_WRITE;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.data.transfer.dataSize = 223;
+
+            for (uint8_t i = 0; i < t.data.transfer.dataSize; i++) {
+                t.data.transfer.data[i] = i;
+            }
+
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_WRITE);
+
+            ASSERT_EQ(t.data.transfer.dataSize, 223);
+
+            for (uint8_t i = 0; i < t.data.transfer.dataSize; i++) {
+                ASSERT_EQ(t.data.transfer.data[i], i);
+            }
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_OW_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.type = PROTO_OW_TRANSFER_TYPE_TOUCH_BIT;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            t.data.touchBit.value = 1;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.owTransfer;
+
+            ASSERT_EQ(t.type, PROTO_OW_TRANSFER_TYPE_TOUCH_BIT);
+
+            ASSERT_EQ(t.data.touchBit.value, 1);
+        }
     }
 
     // RequestDecoderTestData {

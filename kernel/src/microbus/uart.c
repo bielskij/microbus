@@ -3,11 +3,15 @@
 
 #include <linux/module.h>
 #include <linux/i2c.h>
+#include <linux/w1.h>
 #include <linux/tty.h>
 #include <linux/completion.h>
 #include <linux/wait.h>
 #include <linux/mutex.h>
 #include <linux/list.h>
+
+#include <linux/cdev.h>
+#include <linux/device.h>
 
 #include "common/protocol.h"
 #include "common/protocol/packet/decoder.h"
@@ -15,11 +19,17 @@
 #include "common/protocol/request.h"
 #include "common/protocol/response.h"
 
+#include "microbus/ioctl.h"
+
 #define DEBUG_LEVEL_ERROR 1
 #define DEBUG_LEVEL_WARN  2
 #define DEBUG_LEVEL_LOG   3
 #define DEBUG_LEVEL_DBG   4
 #define DEBUG_LEVEL_TRACE 5
+
+static int search_enable = 1;
+module_param(search_enable, int, 0644);
+MODULE_PARM_DESC(search_enable, "Enable automatic 1-Wire device search (1 - enabled, 0 - disabled, default: 1)");
 
 static int debug = DEBUG_LEVEL_LOG;
 module_param(debug, int, 0644);
@@ -101,7 +111,12 @@ typedef struct _UbusUart {
     UbusCmd *pendingCmd;
     bool     hwDetected;
 
-    struct i2c_adapter i2cAdapter;
+    struct i2c_adapter   i2cAdapter;
+    struct w1_bus_master w1Master;
+    char                 w1MasterId[64];
+    dev_t                w1MasterCharDev;
+    struct cdev          w1MasterCharCdev;
+    struct class        *w1MasterClass;
 } UbusUart;
 
 static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
@@ -109,7 +124,7 @@ static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
 
     init_completion(&cmd->workerCompletion);
     init_completion(&cmd->cmdCompletion);
-    
+
     cmd->id = (u8) atomic_inc_return(&ubus->nextCmdId);
 
     // Initialize request
@@ -205,18 +220,316 @@ static int cmd_wait(UbusCmd *cmd) {
     return 0;
 }
 
+static void _w1SearchImpl(void *devData, struct w1_master *master, u8 searchType, w1_slave_found_callback callback) {
+    UbusUart *ubus = (UbusUart *) devData;
+
+    UBUS_TRACE(("[W1]: Search type: %02x", searchType));
+
+    {
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+
+        ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
+        ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
+
+        int slaveCount = 0;
+
+        req->type             = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+        req->data.search.type = searchType;
+
+        bool wasLast = false;
+        do {
+            cmd_prepare(ubus, cmd);
+            cmd_enqueue(ubus, cmd);
+            cmd_wait(cmd);
+
+            UBUS_DBG(("[W1] Search step, status: %02x, rn: 0x%llx, descBit: %u, lastZero: %u, slaveCount: %d",
+                res->status, res->data.search.romId, res->data.search.descBit, res->data.search.lastZero, slaveCount
+            ));
+
+            if (res->status != PROTO_OW_STATUS_SEARCH_STEP) {
+                wasLast = true;
+            }
+
+            if (
+                (res->status == PROTO_OW_STATUS_SEARCH_DONE_FOUND) ||
+                (res->status == PROTO_OW_STATUS_SEARCH_STEP)
+            ) {
+                UBUS_DBG(("[W1] Calling callback with ID: 0x%llx", res->data.search.romId));
+
+                callback(master, res->data.search.romId);
+
+                slaveCount++;
+            }
+
+            if (! wasLast) {
+                cmd = cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+
+                req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
+
+                req->data.search.type     = searchType;
+                req->data.search.descBit  = res->data.search.descBit;
+                req->data.search.lastZero = res->data.search.lastZero;
+                req->data.search.romId    = res->data.search.romId;
+
+                if (slaveCount == master->max_slave_count && (W1_WARN_MAX_COUNT & master->flags) == 0) {
+                    /* Only max_slave_count will be scanned in a search,
+                    * but it will start where it left off next search
+                    * until all ids are identified and then it will start
+                    * over.  A continued search will report the previous
+                    * last id as the first id (provided it is still on the
+                    * bus).
+                    */
+                    dev_info(&master->dev, "%s: max_slave_count %d reached, will continue next search.\n",
+                        __func__, master->max_slave_count
+                    );
+
+                    set_bit(W1_WARN_MAX_COUNT, &master->flags);
+                }
+            }
+
+        } while (! wasLast && (slaveCount < master->max_slave_count));
+    }
+}
+
+static void _w1Search(void *devData, struct w1_master *master, u8 searchType, w1_slave_found_callback callback) {
+    if (search_enable) {
+        _w1SearchImpl(devData, master, searchType, callback);
+    }
+}
+
+static u8 _w1ResetBus(void *devData) {
+    u8 ret = 1;
+
+    {
+        UbusUart *ubus = (UbusUart *) devData;
+
+        UBUS_TRACE(("[W1]: reseting bus"));
+
+        {
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            if (cmd) {
+                ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
+
+                t->type = PROTO_OW_TRANSFER_TYPE_RESET;
+
+                cmd_prepare(ubus, cmd);
+                cmd_enqueue(ubus, cmd);
+                cmd_wait(cmd);
+
+                {
+                    int errorCode = cmd->errorCode;
+
+                    if (errorCode == 0) {
+                        ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
+
+                        if (res->status == PROTO_OW_STATUS_OK) {
+                            ret = 0;
+
+                        } else if (res->status == PROTO_OW_STATUS_NO_PRESENCE) {
+                            ret = 1;
+
+                        } else {
+                            UBUS_ERR(("Received unexpected status code %02x", res->status));
+
+                            ret = -1;
+                        }
+
+                    } else {
+                        ret = -1;
+                    }
+                }
+
+                cmd_free(&cmd);
+            }
+        }
+    }
+
+    //  return -1=Error, 0=Device present, 1=No device present
+    return ret;
+}
+
+static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
+    UbusUart *ubus = (UbusUart *) devData;
+
+    UBUS_TRACE(("[W1]: Writing block of length %d", bufferLength));
+
+    if (bufferLength > 0) {
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        if (cmd != NULL) {
+            int totalWritten = 0;
+
+            do {
+                ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
+
+                req->type = PROTO_OW_TRANSFER_TYPE_WRITE;
+
+                cmd_prepare(ubus, cmd);
+
+                {
+                    size_t toSendDataSize = min(bufferLength - totalWritten, req->data.transfer.dataSize);
+
+                    if (toSendDataSize == 0) {
+                        UBUS_WARN(("Read buffer too small - aborting"));
+
+                        break;
+
+                    } else {
+                        req->data.transfer.dataSize = toSendDataSize;
+
+                        if (toSendDataSize) {
+                            memcpy(req->data.transfer.data, buffer + totalWritten, toSendDataSize);
+                        }
+
+                        cmd_enqueue(ubus, cmd);
+                        cmd_wait(cmd);
+
+                        if (cmd->errorCode == 0) {
+                            totalWritten += toSendDataSize;
+
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+            } while (totalWritten != bufferLength);
+
+            cmd_free(&cmd);
+        }
+    }
+}
+
+static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
+    u8 totalRead = 0;
+
+    UBUS_TRACE(("[W1]: Reading block of length %d", bufferLength));
+
+    if (bufferLength > 0) {
+        UbusUart *ubus = (UbusUart *) devData;
+
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        if (cmd != NULL) {
+            do {
+                ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
+                ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
+
+                req->type = PROTO_OW_TRANSFER_TYPE_READ;
+
+                cmd_prepare(ubus, cmd);
+
+                {
+                    size_t toReadDataSize = min(bufferLength - totalRead, req->data.transfer.dataSize);
+
+                    if (toReadDataSize == 0) {
+                        UBUS_WARN(("Read buffer too small - aborting"));
+
+                        break;
+
+                    } else {
+                        req->data.transfer.dataSize = toReadDataSize;
+
+                        cmd_enqueue(ubus, cmd);
+                        cmd_wait(cmd);
+
+                        if (cmd->errorCode == 0) {
+                            uint16_t readSize = res->data.transfer.dataSize;
+
+                            if (readSize == 0) {
+                                UBUS_WARN(("Received 0 bytes instead of expected %u - interrupting", req->data.transfer.dataSize));
+
+                                break;
+                            }
+
+                            memcpy(buffer + totalRead, res->data.transfer.data, readSize);
+
+                            totalRead += readSize;
+
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+            } while (totalRead != bufferLength);
+
+            cmd_free(&cmd);
+        }
+    }
+
+    return totalRead;
+}
+
+static u8 _w1ReadByte(void *devData) {
+    u8 byte = 0;
+
+    UBUS_TRACE(("[W1]: Reading single byte"));
+
+    _w1ReadBlock(devData, &byte, 1);
+
+    return byte;
+}
+
+static void _w1WriteByte(void *devData, u8 byte) {
+    UBUS_TRACE(("[W1]: Writing single byte %02x", byte));
+
+    _w1WriteBlock(devData, &byte, 1);
+}
+
+static u8 _w1TouchBit(void *devData, u8 bit) {
+    u8 ret = 0;
+
+    {
+        UbusUart *ubus = (UbusUart *) devData;
+
+        UBUS_TRACE(("[W1]: touching bit %u", bit));
+
+        {
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            if (cmd) {
+                ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
+
+                t->type = PROTO_OW_TRANSFER_TYPE_TOUCH_BIT;
+
+                t->data.touchBit.value = bit;
+
+                cmd_prepare(ubus, cmd);
+                cmd_enqueue(ubus, cmd);
+                cmd_wait(cmd);
+
+                {
+                    int errorCode = cmd->errorCode;
+
+                    if (errorCode == 0) {
+                        ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
+
+                        if (res->status == PROTO_OW_STATUS_OK) {
+                            ret = t->data.touchBit.value;
+                        }
+                    }
+                }
+
+                cmd_free(&cmd);
+            }
+        }
+    }
+
+    return ret;
+}
+
 static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
     int ret = 0;
 
     {
         UbusUart *ubus = (UbusUart *) adap->algo_data;
 
-        UBUS_DBG(("Requested transfer of %d I2C messages", num));
+        UBUS_DBG(("[I2C] Requested transfer of %d I2C messages", num));
 
         for (int msgIndex = 0; msgIndex < num; msgIndex++) {
             struct i2c_msg *msg = &msgs[msgIndex];
 
-            UBUS_DBG(("Transfering message %d of %d, slave: %x, data length: %u, flags: %02x", msgIndex + 1, num, msg->addr, msg->len, msg->flags));
+            UBUS_DBG(("[I2C] Transfering message %d of %d, slave: %x, data length: %u, flags: %02x", msgIndex + 1, num, msg->addr, msg->len, msg->flags));
 
             size_t written = 0;
 
@@ -278,7 +591,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
                         }
                     }
 
-                    UBUS_DBG(("Scheduling transfer command START/REP: %d/%d, STOP: %d, READ: %d, CONT: %d, len: %u", 
+                    UBUS_DBG(("[I2C] Scheduling transfer command START/REP: %d/%d, STOP: %d, READ: %d, CONT: %d, len: %u",
                         (tx->flags & PROTO_I2C_TRANSFER_FLAG_START) != 0,
                         (tx->flags & PROTO_I2C_TRANSFER_FLAG_REPEATED_START) != 0,
                         (tx->flags & PROTO_I2C_TRANSFER_FLAG_STOP) != 0,
@@ -295,8 +608,8 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
 
                         if (errorCode == 0) {
                             ProtoResI2cTransfer *t = &cmd->response.response.i2cTransfer;
-                            
-                            UBUS_DBG(("Have transfer command response, status: %u, cmd: %u", t->status, cmd->response.cmd));
+
+                            UBUS_DBG(("[I2C] Have transfer command response, status: %u, cmd: %u", t->status, cmd->response.cmd));
 
                             switch (t->status) {
                                 case PROTO_I2C_STATUS_OK:
@@ -343,7 +656,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
         }
     }
 
-    UBUS_DBG(("Transfer of %d I2C messages has finished with status: %d", num, ret));
+    UBUS_DBG(("[I2C] Transfer of %d I2C messages has finished with status: %d", num, ret));
 
     return ret;
 }
@@ -355,6 +668,184 @@ static u32 _i2cFunctionality(struct i2c_adapter *adap) {
 static const struct i2c_algorithm _ubusI2cAlgo = {
     .master_xfer   = _i2cXfer,
     .functionality = _i2cFunctionality,
+};
+
+static int _w1DevOpen(struct inode *inode, struct file *file) {
+    UBUS_DBG(("CALL"));
+
+    file->private_data = container_of(inode->i_cdev, UbusUart, w1MasterCharCdev);
+
+    return 0;
+}
+
+static int _w1DevRelease(struct inode *inode, struct file *file) {
+    UBUS_DBG(("CALL"));
+
+    file->private_data = NULL;
+
+    return 0;
+}
+
+static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long arg) {
+    UbusUart *ubus = (UbusUart *) file->private_data;
+
+    UBUS_DBG(("CALL"));
+
+    if (_IOC_TYPE(ioctlCmd) != MICROBUS_IOC_MAGIC) {
+        return -ENOTTY;
+    }
+
+    switch (ioctlCmd) {
+        case MICROBUS_IOC_RESET:
+            {
+                __u8 presence;
+
+                presence = _w1ResetBus(ubus);
+
+                if (copy_to_user((__u8 __user *) arg, &presence, sizeof(presence))) {
+                    return -EFAULT;
+                }
+            }
+            break;
+
+        case MICROBUS_IOC_SEARCH_START:
+        case MICROBUS_IOC_SEARCH_STEP:
+            {
+                struct MicrobusSearchStep step;
+
+                if (copy_from_user(&step, (void __user *) arg, sizeof(step))) {
+                    return -EFAULT;
+                }
+
+                {
+                    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+
+                    ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
+                    ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
+
+                    if (ioctlCmd == MICROBUS_IOC_SEARCH_START) {
+                        req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_START;
+
+                    } else {
+                        req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
+
+                        req->data.search.descBit  = step.descBit;
+                        req->data.search.lastZero = step.lastZero;
+                        req->data.search.romId    = step.rn;
+                    }
+
+                    req->data.search.type = step.type;
+
+                    cmd_prepare(ubus, cmd);
+                    cmd_enqueue(ubus, cmd);
+                    cmd_wait(cmd);
+
+                    if (res->status != PROTO_OW_STATUS_SEARCH_STEP) {
+                        step.wasLast = true;
+
+                    } else {
+                        step.wasLast = false;
+                    }
+
+                    if (
+                        (res->status == PROTO_OW_STATUS_SEARCH_DONE_FOUND) ||
+                        (res->status == PROTO_OW_STATUS_SEARCH_STEP)
+                    ) {
+                        step.found = true;
+
+                    } else {
+                        step.found = false;
+                    }
+
+                    step.descBit  = res->data.search.descBit;
+                    step.lastZero = res->data.search.lastZero;
+                    step.rn       = res->data.search.romId;
+
+                    cmd_free(&cmd);
+                }
+
+                if (copy_to_user((void __user *) arg, &step, sizeof(step))) {
+                    return -EFAULT;
+                }
+            }
+            break;
+    }
+
+    return 0;
+}
+
+static char *_w1DevNode(const struct device *dev, umode_t *mode) {
+    if (mode) {
+        *mode = 0666;
+    }
+
+    return NULL;
+}
+
+static ssize_t _w1DevRead(struct file *file, char __user *data, size_t size, loff_t *ppos) {
+    ssize_t ret = size;
+
+    {
+        UbusUart *ubus = (UbusUart *) file->private_data;
+
+        UBUS_DBG(("CALL buffer %p, size: %zd", data, size));
+
+        *ppos = 0;
+
+        if (size > 0) {
+            u8 *kernelBuffer = kmalloc(size, GFP_KERNEL);
+            if (kernelBuffer != NULL) {
+                _w1ReadBlock(ubus, kernelBuffer, size);
+
+                if (copy_to_user(data, kernelBuffer, size)) {
+                    ret = -EFAULT;
+                }
+
+                kfree(kernelBuffer);
+            }
+        }
+    }
+
+    return ret;
+}
+
+static ssize_t _w1DevWrite(struct file *file, const char __user *data, size_t size, loff_t *ppos) {
+    ssize_t ret = size;
+
+    {
+        UbusUart *ubus = (UbusUart *) file->private_data;
+
+        UBUS_DBG(("CALL buffer %p, size: %zd", data, size));
+
+        *ppos = 0;
+
+        if (size > 0) {
+            u8 *kernelBuffer = kmalloc(size, GFP_KERNEL);
+            if (kernelBuffer != NULL) {
+                if (copy_from_user(kernelBuffer, data, size)) {
+                    ret = -EFAULT;
+
+                } else {
+                    _w1WriteBlock(ubus, kernelBuffer, size);
+                }
+
+                kfree(kernelBuffer);
+            }
+        }
+    }
+
+    return ret;
+}
+
+static const struct file_operations _ubusW1Fops = {
+    .owner = THIS_MODULE,
+
+    .open           = _w1DevOpen,
+    .unlocked_ioctl = _w1DevIoctl,
+    .read           = _w1DevRead,
+    .write          = _w1DevWrite,
+    .release        = _w1DevRelease,
+    .llseek         = noop_llseek
 };
 
 static void _sendPacket(UbusUart *ubus, ProtoPkt *pkt) {
@@ -434,12 +925,12 @@ static int _workerRoutine(void *arg) {
 
                     ProtoResGetInfo *info = &response->response.getInfo;
 
-                    UBUS_DBG(("Received response cmd: %u, version %u.%u, payload size: %u, features: %02x", 
+                    UBUS_DBG(("Received response cmd: %u, version %u.%u, payload size: %u, features: %02x",
                         response->cmd, info->version.major, info->version.minor, info->packetSize, info->features
                     ));
 
                     if (
-                        info->version.major != PROTO_VERSION_MAJOR || 
+                        info->version.major != PROTO_VERSION_MAJOR ||
                         info->version.minor != PROTO_VERSION_MINOR
                     ) {
                         UBUS_ERR(("Received response from device that uses not supported protocol version %u.%u != %u.%u",
@@ -462,17 +953,75 @@ static int _workerRoutine(void *arg) {
                             }
                         }
 
-                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c", 
-                            info->version.major, info->version.minor, info->packetSize, 
-                            (info->features & PROTO_FEATURE_I2C) != 0 ? 'Y' : 'N'
+                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c",
+                            info->version.major, info->version.minor, info->packetSize,
+                            (info->features & PROTO_FEATURE_I2C) != 0 ? 'Y' : 'N',
+                            (info->features & PROTO_FEATURE_OW) != 0 ? 'Y' : 'N'
                         ));
 
                         if ((info->features & PROTO_FEATURE_I2C) != 0) {
                             UBUS_DBG(("Registering new i2c device in kernel"));
-                            
+
                             ret = i2c_add_adapter(&ubus->i2cAdapter);
                             if (ret == 0) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
+                            }
+                        }
+
+
+                        if ((info->features & PROTO_FEATURE_OW) != 0) {
+                            UBUS_DBG(("Reginstering new 1wire device in kernel"));
+
+                            ubus->w1Master.data = ubus;
+
+                            ret = w1_add_master_device(&ubus->w1Master);
+                            if (ret == 0) {
+                                UBUS_LOG(("Created new 1wire device"));
+
+                            } else {
+                                ubus->w1Master.data = NULL;
+                            }
+
+                            if (ret == 0) {
+                                ret = alloc_chrdev_region(&ubus->w1MasterCharDev, 0, 1, "microbus_ow");
+                                if (ret != 0) {
+                                    UBUS_ERR(("Can't get major number for new w1 device"));
+
+                                } else {
+                                    cdev_init(&ubus->w1MasterCharCdev, &_ubusW1Fops);
+
+                                    ubus->w1MasterCharCdev.owner = THIS_MODULE;
+
+                                    ret = cdev_add(&ubus->w1MasterCharCdev, ubus->w1MasterCharDev, 1);
+                                    if (ret != 0) {
+                                        UBUS_ERR(("Can't add cdev device for w1"));
+
+                                        unregister_chrdev_region(ubus->w1MasterCharDev, 1);
+
+                                    } else {
+                                        ubus->w1MasterClass = class_create("microbus_ow");
+
+                                        // sets proper rights on device node
+                                        ubus->w1MasterClass->devnode = _w1DevNode;
+
+                                        if (IS_ERR(ubus->w1MasterClass)) {
+                                            UBUS_ERR(("Failed to create w1 class"));
+
+                                            cdev_del(&ubus->w1MasterCharCdev);
+                                            unregister_chrdev_region(ubus->w1MasterCharDev, 1);
+
+                                        } else {
+                                            struct device *dev = device_create(ubus->w1MasterClass, NULL, ubus->w1MasterCharDev, ubus, "ow-%d", MINOR(ubus->w1MasterCharDev));
+                                            if (IS_ERR(dev)) {
+                                                UBUS_ERR(("Failed to create w1 device"));
+
+                                                class_destroy(ubus->w1MasterClass);
+                                                cdev_del(&ubus->w1MasterCharCdev);
+                                                unregister_chrdev_region(ubus->w1MasterCharDev, 1);
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -562,7 +1111,7 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
                         uint8_t errorCode = PROTO_PKT_DES_RET_GET_ERROR_CODE(decRet);
 
                         if (errorCode != PROTO_NO_ERROR) {
-                            UBUS_ERR(("Received protocol error: %u for command id: %u", 
+                            UBUS_ERR(("Received protocol error: %u for command id: %u",
                                 errorCode, cmd->requestPacket.id
                             ));
 
@@ -575,7 +1124,7 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
                                 UBUS_WARN(("Received successful response for different ID (id %u != %u)", pkt->id, cmd->requestPacket.id));
 
                             } else {
-                                UBUS_DBG(("Received successful response for command %u, id: %u, payloadLength: %u/%u (read %zd of %zd)", 
+                                UBUS_DBG(("Received successful response for command %u, id: %u, payloadLength: %u/%u (read %zd of %zd)",
                                     pkt->code, pkt->id, pkt->payloadUsed, pkt->payloadSize, ret, count
                                 ));
 
@@ -617,6 +1166,15 @@ static void _ldiscCleanup(UbusUart **ubus) {
     }
 
     i2c_del_adapter(&b->i2cAdapter);
+
+    if (b->w1Master.data != NULL) {
+        w1_remove_master_device(&b->w1Master);
+
+        device_destroy(b->w1MasterClass, b->w1MasterCharDev);
+        class_destroy(b->w1MasterClass);
+        cdev_del(&b->w1MasterCharCdev);
+        unregister_chrdev_region(b->w1MasterCharDev, 1);
+    }
 
     if (b->worker) {
         UBUS_DBG(("Stopping ubus worker"));
@@ -674,8 +1232,26 @@ static int _ldiscOpen(struct tty_struct *tty) {
 
             ubus->i2cAdapter.algo_data = ubus;
             ubus->i2cAdapter.algo      = &_ubusI2cAlgo;
-    
+
             strncpy(ubus->i2cAdapter.name, "microbus-i2c", sizeof(ubus->i2cAdapter.name));
+        }
+
+        if (ret == 0) {
+            strncpy(ubus->w1MasterId, "microbus-ow", sizeof(ubus->w1MasterId) - 1);
+
+            ubus->w1Master.read_byte   = _w1ReadByte;
+            ubus->w1Master.write_byte  = _w1WriteByte;
+
+            ubus->w1Master.read_block  = _w1ReadBlock;
+            ubus->w1Master.write_block = _w1WriteBlock;
+
+            ubus->w1Master.touch_bit   = _w1TouchBit;
+
+            ubus->w1Master.reset_bus   = _w1ResetBus;
+            ubus->w1Master.search      = _w1Search;
+
+            ubus->w1Master.dev_id = ubus->w1MasterId;
+            ubus->w1Master.data   = NULL;
         }
 
         if (ret == 0) {

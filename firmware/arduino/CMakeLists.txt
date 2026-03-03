@@ -25,7 +25,7 @@ find_program(AVR_UPLOADTOOL avrdude)
 set(AVR_MCU atmega328p)
 set(AVR_L_FUSE 0xF7)
 set(AVR_H_FUSE 0xD9)
-set(AVR_E_FUSE 0xFF) 
+set(AVR_E_FUSE 0xFF)
 
 set(BURN_SCRIPT ${CMAKE_CURRENT_LIST_DIR}/burn.sh)
 
@@ -98,6 +98,7 @@ set(src_path "${CMAKE_CURRENT_LIST_DIR}/src/")
 add_executable(${elf_file}
 	${src_path}/main.c
 	${src_path}/firmware/i2c.c
+	${src_path}/firmware/ow.c
 	${src_path}/firmware/uart.c
 )
 
@@ -113,13 +114,13 @@ target_link_libraries(${elf_file}
 )
 
 add_custom_command(
-	OUTPUT 
+	OUTPUT
 		${hex_file}
 	COMMAND
 		${AVR_OBJCOPY} -j .text -j .data -O ihex ${elf_file} ${hex_file}
 	COMMAND
 		${AVR_SIZE_TOOL} ${AVR_SIZE_ARGS} ${elf_file}
-	DEPENDS 
+	DEPENDS
 		${elf_file}
 )
 
@@ -128,23 +129,23 @@ add_custom_command(
 		${lst_file}
 	COMMAND
 		${AVR_OBJDUMP} -d ${elf_file} > ${lst_file}
-	DEPENDS 
+	DEPENDS
 		${elf_file}
 )
 
 add_custom_command(
-	OUTPUT 
+	OUTPUT
 		${eeprom_image}
 	COMMAND
 		${AVR_OBJCOPY} -j .eeprom --set-section-flags=.eeprom=alloc,load --change-section-lma .eeprom=0 --no-change-warnings -O ihex ${elf_file} ${eeprom_image}
-	DEPENDS 
+	DEPENDS
 		${elf_file}
 )
 
 add_custom_target(
 	${EXECUTABLE_NAME}
 	ALL
-	DEPENDS 
+	DEPENDS
 		${hex_file} ${lst_file} ${eeprom_image}
 )
 
@@ -152,21 +153,21 @@ add_custom_target(
 	upload_${EXECUTABLE_NAME}
 		${BURN_SCRIPT} ${BURN_SCRIPT_BASE_OPTIONS} -f ${hex_file}
 
-	DEPENDS 
+	DEPENDS
 		${hex_file}
 
-	COMMENT 
+	COMMENT
 		"Uploading ${hex_file} to ${AVR_MCU} using ${AVR_PROGRAMMER}"
 )
 
 add_custom_target(
 	upload_${EXECUTABLE_NAME}_eeprom
-		${BURN_SCRIPT} ${BURN_SCRIPT_BASE_OPTIONS} -e ${eeprom_image} 
-		
-	DEPENDS 
+		${BURN_SCRIPT} ${BURN_SCRIPT_BASE_OPTIONS} -e ${eeprom_image}
+
+	DEPENDS
 		${eeprom_image}
 
-	COMMENT 
+	COMMENT
 		"Uploading ${eeprom_image} to ${AVR_MCU} using ${AVR_PROGRAMMER}"
 )
 
@@ -174,7 +175,7 @@ add_custom_target(
 add_custom_target(
 	set_fuses
 		${BURN_SCRIPT} ${BURN_SCRIPT_BASE_OPTIONS} -L ${AVR_L_FUSE} -H ${AVR_H_FUSE} -E ${AVR_E_FUSE}
-		
+
 	COMMENT
 		"Setup: High Fuse: ${AVR_H_FUSE} Low Fuse: ${AVR_L_FUSE}, Extended Fuse: ${AVR_E_FUSE}"
 )

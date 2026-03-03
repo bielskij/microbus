@@ -33,6 +33,15 @@ void proto_req_init(ProtoReq *request, void *memory, uint16_t memorySize, uint8_
             }
             break;
 
+        case PROTO_CMD_OW_TRANSFER:
+            {
+                ProtoReqOwTransfer *t = &request->request.owTransfer;
+
+                t->type = PROTO_OW_TRANSFER_TYPE_UNKNOWN;
+
+                t->data.transfer.dataSize = memorySize - 1;
+            }
+
         default:
             break;
     }
@@ -68,6 +77,29 @@ void proto_req_assign(ProtoReq *request, void *memory, uint16_t memorySize) {
             }
             break;
 
+        case PROTO_CMD_OW_TRANSFER:
+            {
+                ProtoReqOwTransfer *t = &request->request.owTransfer;
+
+                uint8_t dataOffset = 1; // type
+
+                switch (t->type) {
+                    case PROTO_OW_TRANSFER_TYPE_WRITE:
+                        t->data.transfer.data     = PTR_U8(memory) + dataOffset;
+                        t->data.transfer.dataSize = memorySize - dataOffset;
+                        break;
+
+                    case PROTO_OW_TRANSFER_TYPE_READ:
+                        t->data.transfer.data     = NULL;
+                        t->data.transfer.dataSize = memorySize - dataOffset;
+                        break;
+
+                    default:
+                        break;
+                }
+            }
+            break;
+
         default:
             break;
     }
@@ -89,7 +121,7 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
 
                     PTR_U8(memory)[ret++] = t->flags;
 
-                    if (   
+                    if (
                         (t->flags & PROTO_I2C_TRANSFER_FLAG_START) ||
                         (t->flags & PROTO_I2C_TRANSFER_FLAG_REPEATED_START)
                     ) {
@@ -105,10 +137,61 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
                 }
                 break;
 
-            default:
+            case PROTO_CMD_OW_TRANSFER:
                 {
+                    ProtoReqOwTransfer *t = &request->request.owTransfer;
 
+                    PTR_U8(memory)[ret++] = t->type;
+
+                    switch (t->type) {
+                        case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
+                            {
+                                uint64_t romId = t->data.search.romId;
+
+                                for (uint8_t i = 0; i < PROTO_OW_ROM_ID_SIZE; i++) {
+                                    PTR_U8(memory)[ret + i] = romId;
+                                    romId >>= 8;
+                                }
+
+                                ret += PROTO_OW_ROM_ID_SIZE;
+
+                                PTR_U8(memory)[ret++] = t->data.search.descBit;
+                                PTR_U8(memory)[ret++] = t->data.search.lastZero;
+                                PTR_U8(memory)[ret++] = t->data.search.type;
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_SEARCH_START:
+                            {
+                                PTR_U8(memory)[ret++] = t->data.search.type;
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_READ:
+                            {
+                                ret += proto_int_val_encode(t->data.transfer.dataSize, PTR_U8(memory) + ret);
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_WRITE:
+                            {
+                                ret += t->data.transfer.dataSize;
+                            }
+                            break;
+
+                        case PROTO_OW_TRANSFER_TYPE_TOUCH_BIT:
+                            {
+                                PTR_U8(memory)[ret++] = t->data.touchBit.value;
+                            }
+                            break;
+
+                        default:
+                            break;
+                    }
                 }
+                break;
+
+            default:
                 break;
         }
     }
@@ -173,6 +256,97 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                         } else {
                             t->dataSize = memorySize;
                             t->data     = memoryP;
+                        }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_OW_TRANSFER:
+                {
+                    ProtoReqOwTransfer *t = &request->request.owTransfer;
+
+                    if (ret) {
+                        ret = memorySize > 0;
+                        if (ret) {
+                            t->type = *memoryP;
+
+                            memoryP++;
+                            memorySize--;
+                        }
+                    }
+
+                    if (ret) {
+                        switch (t->type) {
+                            case PROTO_OW_TRANSFER_TYPE_SEARCH_STEP:
+                                {
+                                    ret = memorySize > PROTO_OW_ROM_ID_SIZE;
+                                    if (ret) {
+                                        for (uint8_t i = PROTO_OW_ROM_ID_SIZE; i > 0; i--) {
+                                            t->data.search.romId <<= 8;
+                                            t->data.search.romId |= memoryP[i - 1];
+                                        }
+
+                                        memoryP    += PROTO_OW_ROM_ID_SIZE;
+                                        memorySize -= PROTO_OW_ROM_ID_SIZE;
+                                    }
+
+                                    if (ret) {
+                                        ret = memorySize >= 2;
+                                        if (ret) {
+                                            t->data.search.descBit   = memoryP[0];
+                                            t->data.search.lastZero  = memoryP[1];
+                                            t->data.search.type      = memoryP[2];
+
+                                            memoryP    += 3;
+                                            memorySize -= 3;
+                                        }
+                                    }
+                                }
+                                break;
+
+                            case PROTO_OW_TRANSFER_TYPE_SEARCH_START:
+                                {
+                                    ret = memorySize >= 1;
+                                    if (ret) {
+                                        t->data.search.type = memoryP[0];
+
+                                        memoryP++;
+                                        memorySize--;
+                                    }
+                                }
+                                break;
+
+                            case PROTO_OW_TRANSFER_TYPE_WRITE:
+                                {
+                                    t->data.transfer.dataSize = memorySize;
+                                    t->data.transfer.data     = memoryP;
+                                }
+                                break;
+
+                            case PROTO_OW_TRANSFER_TYPE_READ:
+                                if (memorySize) {
+                                    uint8_t lenSize = proto_int_val_length_probe(*memoryP);
+
+                                    t->data.transfer.data = NULL;
+
+                                    ret = memorySize >= lenSize;
+                                    if (ret) {
+                                        t->data.transfer.dataSize = proto_int_val_decode(memoryP);
+
+                                        memoryP    += lenSize;
+                                        memorySize -= lenSize;
+                                    }
+                                }
+                                break;
+
+                            case PROTO_OW_TRANSFER_TYPE_TOUCH_BIT:
+                                if (memorySize) {
+                                    t->data.touchBit.value = *memoryP;
+
+                                    memoryP++;
+                                    memorySize--;
+                                }
+                                break;
                         }
                     }
                 }
