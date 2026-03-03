@@ -130,7 +130,7 @@ int main(int argc, char *argv[]) {
 
                         if (write(fd, &convertCmd, 1) != 1) {
                            spdlog::error("Write failed on fd {}: {}", fd, strerror(errno));
-                           
+
                            continue;
                         }
                     }
@@ -145,7 +145,7 @@ int main(int argc, char *argv[]) {
 
                         if (write(fd, &readScratchpadCmd, 1) != 1) {
                            spdlog::error("Write failed on fd {}: {}", fd, strerror(errno));
-                           
+
                            continue;
                         }
                     }
@@ -167,7 +167,16 @@ int main(int argc, char *argv[]) {
                             continue;
                         }
 
-                        spdlog::info("[{:016X}] Temperature: {:.2f}°C", rn, ((int16_t)(scratchPad[1] << 8) | scratchPad[0]) / 16.0f);
+                        float temp;
+
+                        if ((rn & 0xff) == 0x10) {
+                            temp = ((int16_t)(scratchPad[1] << 8) | scratchPad[0]) / 2.0f;
+
+                        } else {
+                            temp = ((int16_t)(scratchPad[1] << 8) | scratchPad[0]) / 16.0f;
+                        }
+
+                        spdlog::info("[{:016X}] Temperature: {:.2f}°C", rn, temp);
                     }
                 }
             }
