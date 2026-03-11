@@ -144,8 +144,6 @@ TEST(common_protocol, response_ow_transfer) {
 
                 proto_res_init(&decoded, nullptr, 0, response.cmd);
 
-                decoded.response.owTransfer.type = response.response.owTransfer.type;
-
                 proto_res_assign(&decoded, buffer, bufferWritten);
 
                 ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
@@ -180,8 +178,6 @@ TEST(common_protocol, response_ow_transfer) {
 
                 proto_res_init(&decoded, nullptr, 0, response.cmd);
 
-                decoded.response.owTransfer.type = response.response.owTransfer.type;
-
                 proto_res_assign(&decoded, buffer, bufferWritten);
 
                 ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
@@ -214,8 +210,6 @@ TEST(common_protocol, response_ow_transfer) {
 
                 proto_res_init(&decoded, nullptr, 0, response.cmd);
 
-                decoded.response.owTransfer.type = response.response.owTransfer.type;
-
                 proto_res_assign(&decoded, buffer, bufferWritten);
 
                 ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
@@ -240,8 +234,6 @@ TEST(common_protocol, response_ow_transfer) {
                 ProtoRes decoded;
 
                 proto_res_init(&decoded, nullptr, 0, response.cmd);
-
-                decoded.response.owTransfer.type = response.response.owTransfer.type;
 
                 proto_res_assign(&decoded, buffer, bufferWritten);
 
@@ -271,8 +263,6 @@ TEST(common_protocol, response_ow_transfer) {
                 ProtoRes decoded;
 
                 proto_res_init(&decoded, nullptr, 0, response.cmd);
-
-                decoded.response.owTransfer.type = response.response.owTransfer.type;
 
                 proto_res_assign(&decoded, buffer, bufferWritten);
 
@@ -305,8 +295,6 @@ TEST(common_protocol, response_ow_transfer) {
 
                 proto_res_init(&decoded, nullptr, 0, response.cmd);
 
-                decoded.response.owTransfer.type = response.response.owTransfer.type;
-
                 proto_res_assign(&decoded, buffer, bufferWritten);
 
                 ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
@@ -315,6 +303,68 @@ TEST(common_protocol, response_ow_transfer) {
                 ASSERT_EQ(decoded.response.owTransfer.type,   response.response.owTransfer.type);
 
                 ASSERT_EQ(decoded.response.owTransfer.data.touchBit.value, response.response.owTransfer.data.touchBit.value);
+            }
+        }
+    }
+}
+
+TEST(common_protocol, response_spi_transfer) {
+    uint8_t buffer[64];
+
+    uint16_t bufferWritten;
+
+    {
+        ProtoRes response;
+
+        {
+            proto_res_init(&response, buffer, sizeof(buffer), PROTO_CMD_SPI_TRANSFER);
+
+            ASSERT_EQ(response.cmd,                      PROTO_CMD_SPI_TRANSFER);
+            ASSERT_EQ(response.response.spiTransfer.rxBufferSize, sizeof(buffer) - 1);
+
+            response.response.spiTransfer.rxBufferSize = 0;
+
+            proto_res_assign(&response, buffer, sizeof(buffer));
+
+            bufferWritten = proto_res_encode(&response, buffer, sizeof(buffer));
+            ASSERT_EQ(bufferWritten, 0);
+
+            {
+                ProtoRes decoded;
+
+                proto_res_init(&decoded, nullptr, 0, response.cmd);
+
+                proto_res_assign(&decoded, buffer, bufferWritten);
+
+                ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
+
+                ASSERT_EQ(decoded.response.spiTransfer.rxBuffer,     response.response.spiTransfer.rxBuffer);
+                ASSERT_EQ(decoded.response.spiTransfer.rxBufferSize, response.response.spiTransfer.rxBufferSize);
+            }
+        }
+
+        {
+            proto_res_init(&response, buffer, sizeof(buffer), PROTO_CMD_SPI_TRANSFER);
+
+            ASSERT_EQ(response.cmd,                      PROTO_CMD_SPI_TRANSFER);
+            ASSERT_EQ(response.response.spiTransfer.rxBufferSize, sizeof(buffer) - 1);
+
+            proto_res_assign(&response, buffer, sizeof(buffer));
+
+            bufferWritten = proto_res_encode(&response, buffer, sizeof(buffer));
+            ASSERT_EQ(bufferWritten, 63);
+
+            {
+                ProtoRes decoded;
+
+                proto_res_init(&decoded, nullptr, 0, response.cmd);
+
+                proto_res_assign(&decoded, buffer, bufferWritten);
+
+                ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
+
+                ASSERT_EQ(decoded.response.spiTransfer.rxBuffer,     response.response.spiTransfer.rxBuffer);
+                ASSERT_EQ(decoded.response.spiTransfer.rxBufferSize, response.response.spiTransfer.rxBufferSize);
             }
         }
     }

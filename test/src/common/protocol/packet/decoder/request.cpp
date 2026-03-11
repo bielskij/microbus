@@ -466,6 +466,94 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
 
             ASSERT_EQ(t.data.touchBit.value, 1);
         }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_SPI_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.spiTransfer;
+
+            t.flags = PROTO_SPI_TRANSFER_FLAG_KEEP_CS;
+            t.rxBufferSize = 256;
+            t.rxSkipSize   = 256;
+            t.txBufferSize = 256;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.spiTransfer;
+
+            for (int i = 0; i < t.txBufferSize; i++) {
+                t.txBuffer[i] = i;
+            }
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.spiTransfer;
+
+            ASSERT_EQ(t.flags, PROTO_SPI_TRANSFER_FLAG_KEEP_CS);
+
+            ASSERT_EQ(t.rxBufferSize, 256);
+            ASSERT_EQ(t.txBufferSize, 256);
+            ASSERT_EQ(t.rxSkipSize,   256);
+
+            for (int i = 0; i < t.txBufferSize; i++) {
+                ASSERT_EQ(t.txBuffer[i], i);
+            }
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_SPI_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.spiTransfer;
+
+            t.flags = PROTO_SPI_TRANSFER_FLAG_KEEP_CS;
+            t.rxBufferSize = 16;
+            t.rxSkipSize   = 16;
+            t.txBufferSize = 16;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.spiTransfer;
+
+            for (int i = 0; i < t.txBufferSize; i++) {
+                t.txBuffer[i] = i;
+            }
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.spiTransfer;
+
+            ASSERT_EQ(t.flags, PROTO_SPI_TRANSFER_FLAG_KEEP_CS);
+
+            ASSERT_EQ(t.rxBufferSize, 16);
+            ASSERT_EQ(t.txBufferSize, 16);
+            ASSERT_EQ(t.rxSkipSize,   16);
+
+            for (int i = 0; i < t.txBufferSize; i++) {
+                ASSERT_EQ(t.txBuffer[i], i);
+            }
+        }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_SPI_TRANSFER,
+        [](ProtoReq &req){
+            auto &t = req.request.spiTransfer;
+
+            t.flags = 0;
+            t.rxBufferSize = 0;
+            t.rxSkipSize   = 0;
+            t.txBufferSize = 0;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.spiTransfer;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.spiTransfer;
+
+            ASSERT_EQ(t.flags, 0);
+
+            ASSERT_EQ(t.rxBufferSize, 0);
+            ASSERT_EQ(t.txBufferSize, 0);
+            ASSERT_EQ(t.rxSkipSize,   0);
+        }
     }
 
     // RequestDecoderTestData {

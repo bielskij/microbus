@@ -459,6 +459,33 @@ TEST(common_protocol, request_spi_transfer) {
                     ASSERT_EQ(decoded.request.spiTransfer.txBufferSize, request.request.spiTransfer.txBufferSize);
                 }
             }
+
+            {
+                t.rxBufferSize = 0;
+                t.rxSkipSize   = 0;
+                t.txBufferSize = 0;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                ASSERT_EQ(t.txBufferSize, 0);
+
+                bufferWritten = proto_req_encode(&request, buffer, sizeof(buffer));
+                ASSERT_EQ(bufferWritten, 4);
+
+                {
+                    ProtoReq decoded;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.spiTransfer.flags,        request.request.spiTransfer.flags);
+                    ASSERT_EQ(decoded.request.spiTransfer.rxBufferSize, request.request.spiTransfer.rxBufferSize);
+                    ASSERT_EQ(decoded.request.spiTransfer.rxSkipSize,   request.request.spiTransfer.rxSkipSize);
+                    ASSERT_EQ(decoded.request.spiTransfer.txBuffer,     request.request.spiTransfer.txBuffer);
+                    ASSERT_EQ(decoded.request.spiTransfer.txBufferSize, request.request.spiTransfer.txBufferSize);
+                }
+            }
         }
     }
 }

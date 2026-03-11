@@ -215,7 +215,7 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
 }
 
 bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
-    bool ret = memory != NULL && memorySize;
+    bool ret = memory != NULL;
 
     if (ret) {
         uint8_t *memoryP = PTR_U8(memory);
@@ -350,8 +350,16 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                 {
                     ProtoResSpiTransfer *t = &response->response.spiTransfer;
 
-                    t->rxBuffer     = NULL;
+                    if (memorySize) {
+                        t->rxBuffer = memory;
+
+                    } else {
+                        t->rxBuffer = NULL;
+                    }
+
                     t->rxBufferSize = memorySize;
+
+                    ret = true;
                 }
                 break;
 

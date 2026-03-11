@@ -424,12 +424,14 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                             memoryP    += lenSize;
                             memorySize -= lenSize;
 
-                            ret = t->txBufferSize <= memorySize;
-                            if (ret) {
-                                t->txBuffer = memoryP;
+                            if (t->txBufferSize) {
+                                ret = t->txBufferSize <= memorySize;
+                                if (ret) {
+                                    t->txBuffer = memoryP;
 
-                                memoryP    += t->txBufferSize;
-                                memorySize -= t->txBufferSize;
+                                    memoryP    += t->txBufferSize;
+                                    memorySize -= t->txBufferSize;
+                                }
                             }
                         }
 

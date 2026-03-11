@@ -375,5 +375,75 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
 
             ASSERT_EQ(t.data.touchBit.value, 1);
         }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_SPI_TRANSFER,
+        [](ProtoRes &res) {
+            auto &t = res.response.spiTransfer;
+
+            t.rxBufferSize = 0;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.spiTransfer;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.spiTransfer;
+
+            ASSERT_EQ(t.rxBufferSize, 0);
+            ASSERT_EQ(t.rxBuffer,     nullptr);
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_SPI_TRANSFER,
+        [](ProtoRes &res) {
+            auto &t = res.response.spiTransfer;
+
+            t.rxBufferSize = 16;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.spiTransfer;
+
+            for (int i = 0; i < t.rxBufferSize; i++) {
+                t.rxBuffer[i] = i;
+            }
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.spiTransfer;
+
+            ASSERT_EQ(t.rxBufferSize, 16);
+            ASSERT_NE(t.rxBuffer,     nullptr);
+
+            for (int i = 0; i < t.rxBufferSize; i++) {
+                ASSERT_EQ(t.rxBuffer[i], i);
+            }
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_SPI_TRANSFER,
+        [](ProtoRes &res) {
+            auto &t = res.response.spiTransfer;
+
+            t.rxBufferSize = 256;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.spiTransfer;
+
+            for (int i = 0; i < t.rxBufferSize; i++) {
+                t.rxBuffer[i] = i;
+            }
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.spiTransfer;
+
+            ASSERT_EQ(t.rxBufferSize, 256);
+            ASSERT_NE(t.rxBuffer,     nullptr);
+
+            for (int i = 0; i < t.rxBufferSize; i++) {
+                ASSERT_EQ(t.rxBuffer[i], i);
+            }
+        }
     }
 ));
