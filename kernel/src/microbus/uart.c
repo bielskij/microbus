@@ -4,6 +4,7 @@
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/w1.h>
+#include <linux/spi/spi.h>
 #include <linux/tty.h>
 #include <linux/completion.h>
 #include <linux/wait.h>
@@ -111,12 +112,16 @@ typedef struct _UbusUart {
     UbusCmd *pendingCmd;
     bool     hwDetected;
 
-    struct i2c_adapter   i2cAdapter;
-    struct w1_bus_master w1Master;
-    char                 w1MasterId[64];
-    dev_t                w1MasterCharDev;
-    struct cdev          w1MasterCharCdev;
-    struct class        *w1MasterClass;
+    struct i2c_adapter    i2cAdapter;
+
+    struct w1_bus_master  w1Master;
+    char                  w1MasterId[64];
+    dev_t                 w1MasterCharDev;
+    struct cdev           w1MasterCharCdev;
+    struct class         *w1MasterClass;
+
+    struct spi_controller *spiController;
+    struct spi_device     *spiDevice;
 } UbusUart;
 
 static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
@@ -848,6 +853,30 @@ static const struct file_operations _ubusW1Fops = {
     .llseek         = noop_llseek
 };
 
+static struct spi_board_info _spiChip = {
+	.modalias = "spi-microbus",
+};
+
+static int _spiTransferOne(struct spi_controller *ctlr, struct spi_device *spi, struct spi_transfer *transfer) {
+    UBUS_DBG(("CALL buffer tx: %p, size: %d, rx: %p, size: %d", transfer->tx_buf, transfer->len, transfer->rx_buf, transfer->len));
+
+    return 0;
+}
+
+static size_t _spiMaxTransferSize(struct spi_device *spi) {
+    UbusUart *ubus = (UbusUart *) spi_controller_get_devdata(spi->controller);
+
+    {
+        ProtoReq req;
+
+        proto_req_init(&req, NULL, ubus->packetSize, PROTO_CMD_SPI_TRANSFER);
+
+        UBUS_DBG(("CALL, returning %u", req.request.spiTransfer.txBufferSize));
+
+        return req.request.spiTransfer.txBufferSize;
+    }
+}
+
 static void _sendPacket(UbusUart *ubus, ProtoPkt *pkt) {
     // TODO: Handle errors!
     ubus->tty->ops->write(ubus->tty, pkt->header,  pkt->headerUsed);
@@ -953,10 +982,11 @@ static int _workerRoutine(void *arg) {
                             }
                         }
 
-                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c",
+                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c, spi: %c",
                             info->version.major, info->version.minor, info->packetSize,
                             (info->features & PROTO_FEATURE_I2C) != 0 ? 'Y' : 'N',
-                            (info->features & PROTO_FEATURE_OW) != 0 ? 'Y' : 'N'
+                            (info->features & PROTO_FEATURE_OW) != 0 ? 'Y' : 'N',
+                            (info->features & PROTO_FEATURE_SPI) != 0 ? 'Y' : 'N'
                         ));
 
                         if ((info->features & PROTO_FEATURE_I2C) != 0) {
@@ -967,7 +997,6 @@ static int _workerRoutine(void *arg) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
                             }
                         }
-
 
                         if ((info->features & PROTO_FEATURE_OW) != 0) {
                             UBUS_DBG(("Reginstering new 1wire device in kernel"));
@@ -1020,6 +1049,32 @@ static int _workerRoutine(void *arg) {
                                                 unregister_chrdev_region(ubus->w1MasterCharDev, 1);
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+
+                        if ((info->features & PROTO_FEATURE_SPI) != 0) {
+                            struct spi_controller *spi = ubus->spiController;
+
+                            if (spi) {
+                                spi->mode_bits &= ~SPI_MODE_X_MASK;
+
+                                if (info->spiMode0) spi->mode_bits |= SPI_MODE_0;
+                                if (info->spiMode1) spi->mode_bits |= SPI_MODE_1;
+                                if (info->spiMode2) spi->mode_bits |= SPI_MODE_2;
+                                if (info->spiMode3) spi->mode_bits |= SPI_MODE_3;
+
+                                ret = spi_register_controller(spi);
+                                if (ret != 0) {
+                                    UBUS_ERR(("Failed to register SPI controller"));
+
+                                } else {
+                                    UBUS_LOG(("Registered SPI controller spi-%d", spi->bus_num));
+
+                                    ubus->spiDevice = spi_new_device(spi, &_spiChip);
+                                    if (! ubus->spiDevice) {
+                                        UBUS_ERR(("Failed to register SPI device"));
                                     }
                                 }
                             }
@@ -1176,6 +1231,14 @@ static void _ldiscCleanup(UbusUart **ubus) {
         unregister_chrdev_region(b->w1MasterCharDev, 1);
     }
 
+    if (b->spiDevice) {
+        spi_unregister_device(b->spiDevice);
+    }
+
+    if (b->spiController) {
+        spi_unregister_controller(b->spiController);
+    }
+
     if (b->worker) {
         UBUS_DBG(("Stopping ubus worker"));
 
@@ -1226,32 +1289,53 @@ static int _ldiscOpen(struct tty_struct *tty) {
         }
 
         if (ret == 0) {
-            ubus->i2cAdapter.owner     = THIS_MODULE;
-            ubus->i2cAdapter.class     = I2C_CLASS_HWMON;
-            ubus->i2cAdapter.retries   = 0;
+            struct i2c_adapter *i2c = &ubus->i2cAdapter;
 
-            ubus->i2cAdapter.algo_data = ubus;
-            ubus->i2cAdapter.algo      = &_ubusI2cAlgo;
+            i2c->owner     = THIS_MODULE;
+            i2c->class     = I2C_CLASS_HWMON;
+            i2c->retries   = 0;
 
-            strncpy(ubus->i2cAdapter.name, "microbus-i2c", sizeof(ubus->i2cAdapter.name));
+            i2c->algo_data = ubus;
+            i2c->algo      = &_ubusI2cAlgo;
+
+            strncpy(i2c->name, "microbus-i2c", sizeof(i2c->name));
         }
 
         if (ret == 0) {
+            struct w1_bus_master *w1 = &ubus->w1Master;
+
             strncpy(ubus->w1MasterId, "microbus-ow", sizeof(ubus->w1MasterId) - 1);
 
-            ubus->w1Master.read_byte   = _w1ReadByte;
-            ubus->w1Master.write_byte  = _w1WriteByte;
+            w1->read_byte   = _w1ReadByte;
+            w1->write_byte  = _w1WriteByte;
 
-            ubus->w1Master.read_block  = _w1ReadBlock;
-            ubus->w1Master.write_block = _w1WriteBlock;
+            w1->read_block  = _w1ReadBlock;
+            w1->write_block = _w1WriteBlock;
 
-            ubus->w1Master.touch_bit   = _w1TouchBit;
+            w1->touch_bit   = _w1TouchBit;
 
-            ubus->w1Master.reset_bus   = _w1ResetBus;
-            ubus->w1Master.search      = _w1Search;
+            w1->reset_bus   = _w1ResetBus;
+            w1->search      = _w1Search;
 
-            ubus->w1Master.dev_id = ubus->w1MasterId;
-            ubus->w1Master.data   = NULL;
+            w1->dev_id = ubus->w1MasterId;
+            w1->data   = NULL;
+        }
+
+        if (ret == 0) {
+            struct spi_controller *spi = spi_alloc_host(tty->dev, 0);
+
+            if (spi) {
+                spi->auto_runtime_pm    = false;
+                spi->bits_per_word_mask = SPI_BPW_MASK(8);
+                spi->bus_num            = -1;
+
+                spi->transfer_one       = _spiTransferOne;
+                spi->max_transfer_size  = _spiMaxTransferSize;
+
+                spi_controller_set_devdata(spi, ubus);
+
+                ubus->spiController = spi;
+            }
         }
 
         if (ret == 0) {

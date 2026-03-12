@@ -25,6 +25,11 @@ typedef struct _ProtoResGetInfo {
     uint16_t packetSize;
 
     uint8_t features;
+
+    bool    spiMode0;
+    bool    spiMode1;
+    bool    spiMode2;
+    bool    spiMode3;
 } ProtoResGetInfo;
 
 typedef struct _ProtoResI2cTransfer {

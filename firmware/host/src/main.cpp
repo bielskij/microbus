@@ -76,9 +76,16 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
     switch (request->cmd) {
         case PROTO_CMD_GET_INFO:
             {
+                auto &info = response->response.getInfo;
+
                 DBG(("PROTO_CMD_GET_INFO"));
 
-                response->response.getInfo.features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW;
+                info.features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW | PROTO_FEATURE_SPI;
+
+                info.spiMode0 = true;
+                info.spiMode1 = true;
+                info.spiMode2 = true;
+                info.spiMode3 = true;
             }
             break;
 
@@ -229,6 +236,17 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
                         }
                         break;
                 }
+            }
+            break;
+
+        case PROTO_CMD_SPI_TRANSFER:
+            {
+                auto &req = request->request.spiTransfer;
+                auto &res = response->response.spiTransfer;
+
+                DBG(("PROTO_CMD_SPI_TRANSFER [flags: {:x}, tx: {}, rx: {}, skip: {}]", req.flags, req.txBufferSize, req.rxBufferSize, req.rxSkipSize));
+
+                res.rxBufferSize = req.rxBufferSize;
             }
             break;
 

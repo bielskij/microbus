@@ -23,6 +23,11 @@ void proto_res_init(ProtoRes *response, void *memory, uint16_t memorySize, uint8
 
                 info->packetSize = 0;
                 info->features   = 0;
+
+                info->spiMode0 = false;
+                info->spiMode1 = false;
+                info->spiMode2 = false;
+                info->spiMode3 = false;
             }
             break;
 
@@ -138,6 +143,17 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                     ret += proto_int_val_encode(info->packetSize, PTR_U8(memory) + ret);
 
                     PTR_U8(memory)[ret++] = info->features;
+
+                    if (info->features & PROTO_FEATURE_SPI) {
+                        uint8_t modes = 0;
+
+                        if (info->spiMode0) modes |= PROTO_FEATURE_SPI_MODE_FLAG_0;
+                        if (info->spiMode1) modes |= PROTO_FEATURE_SPI_MODE_FLAG_1;
+                        if (info->spiMode2) modes |= PROTO_FEATURE_SPI_MODE_FLAG_2;
+                        if (info->spiMode3) modes |= PROTO_FEATURE_SPI_MODE_FLAG_3;
+
+                        PTR_U8(memory)[ret++] = modes;
+                    }
                 }
                 break;
 
@@ -258,6 +274,23 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
 
                             memoryP++;
                             memorySize--;
+                        }
+                    }
+
+                    if (ret) {
+                        if (info->features & PROTO_FEATURE_SPI) {
+                            ret = memorySize > 0;
+                            if (ret) {
+                                uint8_t modes = *memoryP;
+
+                                if ((modes & PROTO_FEATURE_SPI_MODE_FLAG_0) != 0) info->spiMode0 = true;
+                                if ((modes & PROTO_FEATURE_SPI_MODE_FLAG_1) != 0) info->spiMode1 = true;
+                                if ((modes & PROTO_FEATURE_SPI_MODE_FLAG_2) != 0) info->spiMode2 = true;
+                                if ((modes & PROTO_FEATURE_SPI_MODE_FLAG_3) != 0) info->spiMode3 = true;
+
+                                memoryP++;
+                                memorySize--;
+                            }
                         }
                     }
                 }

@@ -15,14 +15,21 @@
  *  - No payload
  *
  * Response payload:
- *  [    4b   ][    4b   ][   1/2B   ][   1B   ]
- *  [ VER_MAJ ][ VER_MIN ][ PLD_SIZE ][FEATURES]
+ *  [    4b   ][    4b   ][   1/2B   ][   1B   ][   4b    ][4b]
+ *  [ VER_MAJ ][ VER_MIN ][ PLD_SIZE ][FEATURES][SPI_MODES][  ]
  */
 #define PROTO_CMD_GET_INFO 0x0
 
 #define PROTO_FEATURE_I2C (1 << 0)
 #define PROTO_FEATURE_OW  (1 << 1)
+#define PROTO_FEATURE_SPI (1 << 2)
 
+// SPI_MODES field in response exists only if PROTO_FEATURE_SPI flag is set in FEATURES byte
+#define PROTO_FEATURE_SPI_MODE_FLAG_0 (1 << 4)
+#define PROTO_FEATURE_SPI_MODE_FLAG_1 (1 << 5)
+#define PROTO_FEATURE_SPI_MODE_FLAG_2 (1 << 6)
+#define PROTO_FEATURE_SPI_MODE_FLAG_3 (1 << 7)
+#define PROTO_FEATURE_SPI_MODE_MASK   (0xf0)
 /*
  * 2) CMD_I2C_TRANSFER
  *
@@ -101,12 +108,18 @@
 /*
  * 4) CMD_SPI_TRANSFER
  *
- * [  1B   ][  1/2B   ][    TX_SIZE     ][     1/2B     ][  1/2B   ]
- * [ FLAGS ][ TX_SIZE ][ TX_DATA ][ ... ][ RX_SKIP_SIZE ][ RX_SIZE ]
+ * [  6b   ][  2b  ][  1/2B   ][    TX_SIZE     ][     1/2B     ][  1/2B   ]
+ * [ FLAGS ][ MODE ][ TX_SIZE ][ TX_DATA ][ ... ][ RX_SKIP_SIZE ][ RX_SIZE ]
  */
 
 #define PROTO_CMD_SPI_TRANSFER  0x3
 
-#define PROTO_SPI_TRANSFER_FLAG_KEEP_CS (1 << 0)
+#define PROTO_SPI_TRANSFER_FLAG_KEEP_CS (1 << 7)
+
+#define PROTO_SPI_TRANSFER_MODE_0       (0x00)
+#define PROTO_SPI_TRANSFER_MODE_1       (0x01)
+#define PROTO_SPI_TRANSFER_MODE_2       (0x02)
+#define PROTO_SPI_TRANSFER_MODE_3       (0x03)
+#define PROTO_SPI_TRANSFER_MODE_MASK    (0x03)
 
 #endif /* FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_ */

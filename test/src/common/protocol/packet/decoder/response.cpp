@@ -123,6 +123,8 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
             i.packetSize    = 512;
             i.version.major = 4;
             i.version.minor = 5;
+
+            i.spiMode0 = true;
         },
         [](ProtoRes &res) {
 
@@ -134,6 +136,42 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
             ASSERT_EQ(i.packetSize,    512);
             ASSERT_EQ(i.version.major, 4);
             ASSERT_EQ(i.version.minor, 5);
+
+            ASSERT_EQ(i.spiMode0, false);
+            ASSERT_EQ(i.spiMode1, false);
+            ASSERT_EQ(i.spiMode2, false);
+            ASSERT_EQ(i.spiMode3, false);
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_GET_INFO,
+        [](ProtoRes &res) {
+            auto &i = res.response.getInfo;
+
+            i.features      = PROTO_FEATURE_SPI;
+            i.packetSize    = 512;
+            i.version.major = 4;
+            i.version.minor = 5;
+
+            i.spiMode2 = true;
+            i.spiMode3 = true;
+        },
+        [](ProtoRes &res) {
+
+        },
+        [](ProtoRes &res) {
+            auto &i = res.response.getInfo;
+
+            ASSERT_EQ(i.features,      PROTO_FEATURE_SPI);
+            ASSERT_EQ(i.packetSize,    512);
+            ASSERT_EQ(i.version.major, 4);
+            ASSERT_EQ(i.version.minor, 5);
+
+            ASSERT_EQ(i.spiMode0, false);
+            ASSERT_EQ(i.spiMode1, false);
+            ASSERT_EQ(i.spiMode2, true);
+            ASSERT_EQ(i.spiMode3, true);
         }
     },
 
