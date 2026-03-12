@@ -5,6 +5,7 @@
 #include <linux/i2c.h>
 #include <linux/w1.h>
 #include <linux/spi/spi.h>
+#include <linux/platform_device.h>
 #include <linux/tty.h>
 #include <linux/completion.h>
 #include <linux/wait.h>
@@ -111,6 +112,8 @@ typedef struct _UbusUart {
 
     UbusCmd *pendingCmd;
     bool     hwDetected;
+
+    struct platform_device *platformDevice;
 
     struct i2c_adapter    i2cAdapter;
 
@@ -854,7 +857,7 @@ static const struct file_operations _ubusW1Fops = {
 };
 
 static struct spi_board_info _spiChip = {
-	.modalias = "spi-microbus",
+	.modalias = "microbus-spi",
 };
 
 static int _spiTransferOne(struct spi_controller *ctlr, struct spi_device *spi, struct spi_transfer *transfer) {
@@ -1072,11 +1075,16 @@ static int _workerRoutine(void *arg) {
                                 } else {
                                     UBUS_LOG(("Registered SPI controller spi-%d", spi->bus_num));
 
+                                    _spiChip.mode    = spi->mode_bits;
+                                    _spiChip.bus_num = spi->bus_num;
+
                                     ubus->spiDevice = spi_new_device(spi, &_spiChip);
                                     if (! ubus->spiDevice) {
                                         UBUS_ERR(("Failed to register SPI device"));
                                     }
                                 }
+                            } else {
+                                UBUS_WARN(("SPI is null!"));
                             }
                         }
                     }
@@ -1239,6 +1247,10 @@ static void _ldiscCleanup(UbusUart **ubus) {
         spi_unregister_controller(b->spiController);
     }
 
+    if (b->platformDevice) {
+        platform_device_unregister(b->platformDevice);
+    }
+
     if (b->worker) {
         UBUS_DBG(("Stopping ubus worker"));
 
@@ -1289,6 +1301,13 @@ static int _ldiscOpen(struct tty_struct *tty) {
         }
 
         if (ret == 0) {
+            ubus->platformDevice = platform_device_register_simple("microbus-bridge", -1, NULL, 0);
+            if (! ubus->platformDevice) {
+                UBUS_WARN(("Failed to create microbus platform device"));
+            }
+        }
+
+        if (ret == 0) {
             struct i2c_adapter *i2c = &ubus->i2cAdapter;
 
             i2c->owner     = THIS_MODULE;
@@ -1322,19 +1341,24 @@ static int _ldiscOpen(struct tty_struct *tty) {
         }
 
         if (ret == 0) {
-            struct spi_controller *spi = spi_alloc_host(tty->dev, 0);
+            if (ubus->platformDevice) {
+                struct spi_controller *spi = spi_alloc_host(&ubus->platformDevice->dev, 0);
 
-            if (spi) {
-                spi->auto_runtime_pm    = false;
-                spi->bits_per_word_mask = SPI_BPW_MASK(8);
-                spi->bus_num            = -1;
+                if (spi) {
+                    spi->auto_runtime_pm    = false;
+                    spi->bits_per_word_mask = SPI_BPW_MASK(8);
+                    spi->bus_num            = -1;
 
-                spi->transfer_one       = _spiTransferOne;
-                spi->max_transfer_size  = _spiMaxTransferSize;
+                    spi->transfer_one       = _spiTransferOne;
+                    spi->max_transfer_size  = _spiMaxTransferSize;
 
-                spi_controller_set_devdata(spi, ubus);
+                    spi_controller_set_devdata(spi, ubus);
 
-                ubus->spiController = spi;
+                    ubus->spiController = spi;
+
+                } else {
+                    UBUS_WARN(("Failed to allocate SPI host controller"));
+                }
             }
         }
 
