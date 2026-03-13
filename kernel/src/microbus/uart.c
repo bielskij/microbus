@@ -857,7 +857,10 @@ static const struct file_operations _ubusW1Fops = {
 };
 
 static struct spi_board_info _spiChip = {
-	.modalias = "microbus-spi",
+    .modalias    = "microbus-spi",
+    .mode        = SPI_MODE_0,
+    .bus_num     = 0,
+    .chip_select = 0
 };
 
 static int _spiTransferOne(struct spi_controller *ctlr, struct spi_device *spi, struct spi_transfer *transfer) {
@@ -1074,9 +1077,6 @@ static int _workerRoutine(void *arg) {
 
                                 } else {
                                     UBUS_LOG(("Registered SPI controller spi-%d", spi->bus_num));
-
-                                    _spiChip.mode    = spi->mode_bits;
-                                    _spiChip.bus_num = spi->bus_num;
 
                                     ubus->spiDevice = spi_new_device(spi, &_spiChip);
                                     if (! ubus->spiDevice) {
