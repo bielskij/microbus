@@ -962,6 +962,10 @@ static void _handleCmd(UbusUart *ubus, UbusCmd *cmd, bool force) {
     complete(&cmd->cmdCompletion);
 }
 
+static struct i2c_board_info _boardInfo = {
+    I2C_BOARD_INFO("pn544", 0x28)
+};
+
 static int _workerRoutine(void *arg) {
     UbusUart *ubus = (UbusUart *) arg;
 
@@ -1062,6 +1066,9 @@ static int _workerRoutine(void *arg) {
                             ret = i2c_add_adapter(&ubus->i2cAdapter);
                             if (ret == 0) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
+
+                                // TODO: Fixme
+                                i2c_new_client_device(&ubus->i2cAdapter, &_boardInfo);
                             }
                         }
 
