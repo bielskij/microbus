@@ -4,6 +4,11 @@
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/w1.h>
+
+#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
+#include <linux/gpio/machine.h>
+
 #include <linux/tty.h>
 #include <linux/completion.h>
 #include <linux/wait.h>
@@ -117,6 +122,9 @@ typedef struct _UbusUart {
     dev_t                w1MasterCharDev;
     struct cdev          w1MasterCharCdev;
     struct class        *w1MasterClass;
+
+    struct gpio_chip           gpio;
+    struct gpiod_lookup_table *gpioLookup;
 } UbusUart;
 
 static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
@@ -848,6 +856,54 @@ static const struct file_operations _ubusW1Fops = {
     .llseek         = noop_llseek
 };
 
+static int _gpioDevDirectionInput(struct gpio_chip *gpio, unsigned int offset) {
+    UBUS_DBG(("CALL offset %u", offset));
+
+    return 0;
+}
+
+static int _gpioDevDirectionOutput(struct gpio_chip *gpio, unsigned int offset, int value) {
+    UBUS_DBG(("CALL offset %u, value: %d", offset, value));
+
+    return 0;
+}
+
+static int _gpioDevGet(struct gpio_chip *gpio, unsigned int offset) {
+    UBUS_DBG(("CALL offset %u", offset));
+
+    return 0; // 0 or 1
+}
+
+static void _gpioIrqMask(struct irq_data *data) {
+    UBUS_DBG(("CALL "));
+}
+
+static void _gpioIrqUnmask(struct irq_data *data) {
+    UBUS_DBG(("CALL "));
+}
+
+static int _gpioIrqSetType(struct irq_data *data, unsigned int type) {
+    UBUS_DBG(("CALL, type: %d", type));
+
+    return 0;
+}
+
+static const struct irq_chip _gpioIrqChip = {
+    .name = "microbus-gpio-irq",
+
+    .irq_mask     = _gpioIrqMask,
+    .irq_unmask   = _gpioIrqUnmask,
+    .irq_set_type = _gpioIrqSetType,
+
+    .flags  = IRQCHIP_IMMUTABLE,
+
+    GPIOCHIP_IRQ_RESOURCE_HELPERS,
+};
+
+static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) {
+    UBUS_DBG(("CALL offset %u, value: %d", offset, value));
+}
+
 static void _sendPacket(UbusUart *ubus, ProtoPkt *pkt) {
     // TODO: Handle errors!
     ubus->tty->ops->write(ubus->tty, pkt->header,  pkt->headerUsed);
@@ -953,11 +1009,52 @@ static int _workerRoutine(void *arg) {
                             }
                         }
 
-                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c",
+                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c, gpio: %c",
                             info->version.major, info->version.minor, info->packetSize,
-                            (info->features & PROTO_FEATURE_I2C) != 0 ? 'Y' : 'N',
-                            (info->features & PROTO_FEATURE_OW) != 0 ? 'Y' : 'N'
+                            (info->features & PROTO_FEATURE_I2C)  != 0 ? 'Y' : 'N',
+                            (info->features & PROTO_FEATURE_OW)   != 0 ? 'Y' : 'N',
+                            (info->features & PROTO_FEATURE_GPIO) != 0 ? 'Y' : 'N'
                         ));
+
+                        info->features |= PROTO_FEATURE_GPIO; // REMOVE
+                        if ((info->features & PROTO_FEATURE_GPIO) != 0) {
+                            size_t gpioCount = 4;
+
+                            UBUS_DBG(("Registering new gpio device in kernel"));
+
+                            ubus->gpioLookup = kzalloc(struct_size(ubus->gpioLookup, table, gpioCount + 1), GFP_KERNEL);
+                            if (ubus->gpioLookup == NULL) {
+                                UBUS_ERR(("Cannot allocate memory for gpio mapping"));
+
+                            } else {
+                                struct gpio_chip *gpio = &ubus->gpio;
+
+                                gpio->ngpio = gpioCount;
+
+                                {
+                                    ubus->gpioLookup->dev_id = "1-0028";
+
+                                    ubus->gpioLookup->table[0] =  GPIO_LOOKUP("microbus-gpio", 0, "enable",   GPIO_ACTIVE_HIGH);
+                                    ubus->gpioLookup->table[1] =  GPIO_LOOKUP("microbus-gpio", 1, "firmware", GPIO_ACTIVE_HIGH);
+
+                                    gpiod_add_lookup_table(ubus->gpioLookup);
+                                }
+
+                                gpio_irq_chip_set_chip(&gpio->irq, &_gpioIrqChip);
+
+                                ret = gpiochip_add_data(gpio, ubus);
+                                if (! ret) {
+                                    UBUS_LOG(("Created new gpio chip"));
+
+                                } else {
+                                    UBUS_ERR(("Cannot register gpio chip (%d)", ret));
+
+                                    kfree(ubus->gpioLookup);
+
+                                    ubus->gpioLookup = NULL;
+                                }
+                            }
+                        }
 
                         if ((info->features & PROTO_FEATURE_I2C) != 0) {
                             UBUS_DBG(("Registering new i2c device in kernel"));
@@ -968,9 +1065,8 @@ static int _workerRoutine(void *arg) {
                             }
                         }
 
-
                         if ((info->features & PROTO_FEATURE_OW) != 0) {
-                            UBUS_DBG(("Reginstering new 1wire device in kernel"));
+                            UBUS_DBG(("Registering new 1wire device in kernel"));
 
                             ubus->w1Master.data = ubus;
 
@@ -1100,6 +1196,9 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
         {
             UbusCmd *cmd = ubus->pendingCmd;
             if (! cmd) {
+// bcma/driver_gpio.c
+// generic_handle_domain_irq_safe(ubus->gpio.irq.domain, 0);
+
                 UBUS_ERR(("Received %zd bytes but there is no pending command - discarding %zd bytes", count, ret));
 
             } else {
@@ -1176,6 +1275,16 @@ static void _ldiscCleanup(UbusUart **ubus) {
         unregister_chrdev_region(b->w1MasterCharDev, 1);
     }
 
+    if (b->gpioLookup) {
+        gpiod_remove_lookup_table(b->gpioLookup);
+
+        gpiochip_remove(&b->gpio);
+
+        kfree(b->gpioLookup);
+
+        b->gpioLookup = NULL;
+    }
+
     if (b->worker) {
         UBUS_DBG(("Stopping ubus worker"));
 
@@ -1226,32 +1335,62 @@ static int _ldiscOpen(struct tty_struct *tty) {
         }
 
         if (ret == 0) {
-            ubus->i2cAdapter.owner     = THIS_MODULE;
-            ubus->i2cAdapter.class     = I2C_CLASS_HWMON;
-            ubus->i2cAdapter.retries   = 0;
+            struct i2c_adapter *adapter = &ubus->i2cAdapter;
 
-            ubus->i2cAdapter.algo_data = ubus;
-            ubus->i2cAdapter.algo      = &_ubusI2cAlgo;
+            adapter->owner     = THIS_MODULE;
+            adapter->class     = I2C_CLASS_HWMON;
+            adapter->retries   = 0;
 
-            strncpy(ubus->i2cAdapter.name, "microbus-i2c", sizeof(ubus->i2cAdapter.name));
+            adapter->algo_data = ubus;
+            adapter->algo      = &_ubusI2cAlgo;
+
+            strncpy(adapter->name, "microbus-i2c", sizeof(adapter->name));
         }
 
         if (ret == 0) {
+            struct w1_bus_master *master = &ubus->w1Master;
+
             strncpy(ubus->w1MasterId, "microbus-ow", sizeof(ubus->w1MasterId) - 1);
 
-            ubus->w1Master.read_byte   = _w1ReadByte;
-            ubus->w1Master.write_byte  = _w1WriteByte;
+            master->read_byte   = _w1ReadByte;
+            master->write_byte  = _w1WriteByte;
 
-            ubus->w1Master.read_block  = _w1ReadBlock;
-            ubus->w1Master.write_block = _w1WriteBlock;
+            master->read_block  = _w1ReadBlock;
+            master->write_block = _w1WriteBlock;
 
-            ubus->w1Master.touch_bit   = _w1TouchBit;
+            master->touch_bit   = _w1TouchBit;
 
-            ubus->w1Master.reset_bus   = _w1ResetBus;
-            ubus->w1Master.search      = _w1Search;
+            master->reset_bus   = _w1ResetBus;
+            master->search      = _w1Search;
 
-            ubus->w1Master.dev_id = ubus->w1MasterId;
-            ubus->w1Master.data   = NULL;
+            master->dev_id = ubus->w1MasterId;
+            master->data   = NULL;
+        }
+
+        if (ret == 0) {
+            struct gpio_chip *gpio = &ubus->gpio;
+
+            gpio->label  = "microbus-gpio";
+            gpio->owner  = THIS_MODULE;
+            gpio->parent = NULL;
+
+            gpio->base      = -1;
+            gpio->can_sleep = true;
+
+            gpio->direction_input  = _gpioDevDirectionInput;
+            gpio->direction_output = _gpioDevDirectionOutput;
+            gpio->get              = _gpioDevGet;
+            gpio->set              = _gpioDevSet;
+
+            {
+                struct gpio_irq_chip *girq = &gpio->irq;
+
+                girq->parent_handler = NULL;
+                girq->num_parents    = 0;
+                girq->parents        = NULL;
+                girq->default_type   = IRQ_TYPE_NONE;
+                girq->handler        = handle_simple_irq;
+            }
         }
 
         if (ret == 0) {

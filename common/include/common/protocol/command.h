@@ -20,8 +20,9 @@
  */
 #define PROTO_CMD_GET_INFO 0x0
 
-#define PROTO_FEATURE_I2C (1 << 0)
-#define PROTO_FEATURE_OW  (1 << 1)
+#define PROTO_FEATURE_I2C  (1 << 0)
+#define PROTO_FEATURE_OW   (1 << 1)
+#define PROTO_FEATURE_GPIO (1 << 2)
 
 /*
  * 2) CMD_I2C_TRANSFER
