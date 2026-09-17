@@ -4,9 +4,7 @@
 #include "common/protocol.h"
 #include "common/protocol/command.h"
 #include "common/protocol/response.h"
-
-#include "common.h"
-
+#include "common/protocol/common.h"
 
 #define PTR_U8(x) ((uint8_t *)(x))
 

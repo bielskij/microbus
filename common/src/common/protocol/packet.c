@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: MIT OR GPL-2.0-only
 // SPDX-FileCopyrightText: 2026 Jarosław Bielski <bielski.j@gmail.com>
 
+#ifdef __KERNEL__
+    #include <linux/string.h>
+#else
+    #include <string.h>
+#endif
+
 #include "common/crc8.h"
 
 #include "common/protocol.h"
 #include "common/protocol/packet.h"
 
-#include "common.h"
+#include "common/protocol/common.h"
 
 
 #define PTR_U8(x) ((uint8_t *)(x))
@@ -25,7 +31,7 @@ void proto_pkt_init(ProtoPkt *pkt, void *mem, uint16_t memSize, uint8_t code, ui
 
         if (payloadSize > memSize) {
             ignorePacket = true;
-            
+
         } else {
             payloadSize = memSize - payloadSize;
             if (payloadSize) {
@@ -58,7 +64,7 @@ void proto_pkt_init(ProtoPkt *pkt, void *mem, uint16_t memSize, uint8_t code, ui
 
         pkt->payload     = NULL;
         pkt->payloadSize = 0;
-        
+
         pkt->footer      = NULL;
         pkt->footerSize  = 0;
     }
@@ -81,7 +87,7 @@ bool proto_pkt_encode_header(ProtoPkt *pkt) {
 		return false;
 	}
 
-	pkt->header[off++] = PROTO_SYNC_NIBBLE | (pkt->code & PROTO_CMD_NIBBLE_MASK);
+	pkt->header[off++] = PROTO_SYNC_NIBBLE | (pkt->code & PROTO_CODE_MASK);
 	pkt->header[off++] = pkt->id;
 
 	pkt->headerUsed = off + proto_int_val_encode(pkt->payloadUsed, pkt->header + off);
@@ -107,4 +113,32 @@ bool proto_pkt_encode(ProtoPkt *pkt) {
 
 uint16_t proto_pkt_size(ProtoPkt *pkt) {
 	return pkt->headerSize + pkt->payloadSize + pkt->footerSize;
+}
+
+bool proto_pkt_copy(ProtoPkt *dst, ProtoPkt *src) {
+    bool ret = true;
+
+    if (! dst || ! src) {
+        ret = false;
+
+    } else {
+        if (
+            (src->headerUsed  > dst->headerSize)  ||
+            (src->payloadUsed > dst->payloadSize) ||
+            (src->footerUsed  > dst->footerSize)
+        ) {
+            ret = false;
+
+        } else {
+            dst->headerUsed  = src->headerUsed;
+            dst->payloadUsed = src->payloadUsed;
+            dst->footerUsed  = src->footerUsed;
+
+            memcpy(dst->header,  src->header,  src->headerUsed);
+            memcpy(dst->payload, src->payload, src->payloadUsed);
+            memcpy(dst->footer,  src->footer,  src->footerUsed);
+        }
+    }
+
+    return ret;
 }

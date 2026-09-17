@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.28)
 
 set(DEFAULT_AVR_UPLOADTOOL_PORT     /dev/ttyUSB0)
 set(DEFAULT_AVR_UPLOADTOOL_BAUDRATE 57600)

@@ -116,6 +116,10 @@ typedef struct _UbusUart {
     UbusCmd *pendingCmd;
     bool     hwDetected;
 
+    void    *tmpPacketBuffer;
+    size_t   tmpPacketBufferSize;
+    ProtoPkt tmpPacket;
+
     struct i2c_adapter   i2cAdapter;
     struct w1_bus_master w1Master;
     char                 w1MasterId[64];
@@ -219,6 +223,24 @@ static void cmd_free(UbusCmd **cmd) {
         kfree(c);
 
         *cmd = NULL;
+    }
+}
+
+static void _prepareTmpPacket(UbusUart *ubus) {
+    if (
+        (ubus->tmpPacketBuffer == NULL) ||
+        (ubus->tmpPacketBufferSize != ubus->packetSize)
+    ) {
+        UBUS_LOG(("Resizing temporary packet buffer from %zd to %zd bytes", ubus->tmpPacketBufferSize, ubus->packetSize));
+
+        if (ubus->tmpPacketBuffer) {
+            kfree(ubus->tmpPacketBuffer);
+        }
+
+        ubus->tmpPacketBufferSize = ubus->packetSize;
+        ubus->tmpPacketBuffer     = kmalloc(ubus->tmpPacketBufferSize, GFP_KERNEL);
+
+        proto_pkt_init(&ubus->tmpPacket, ubus->tmpPacketBuffer, ubus->tmpPacketBufferSize, 0, 0);
     }
 }
 
@@ -1020,6 +1042,8 @@ static int _workerRoutine(void *arg) {
                             (info->features & PROTO_FEATURE_GPIO) != 0 ? 'Y' : 'N'
                         ));
 
+                        _prepareTmpPacket(ubus);
+
                         info->features |= PROTO_FEATURE_GPIO; // REMOVE
                         if ((info->features & PROTO_FEATURE_GPIO) != 0) {
                             size_t gpioCount = 4;
@@ -1197,67 +1221,69 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
     {
         UbusUart *ubus = (UbusUart *) tty->disc_data;
 
-        unsigned long flags;
+        while (ret < count) {
+            ProtoPkt *pkt = &ubus->tmpPacket;
 
-        spin_lock_irqsave(&ubus->workerQueueLock, flags);
-        {
-            UbusCmd *cmd = ubus->pendingCmd;
-            if (! cmd) {
-// bcma/driver_gpio.c
-// generic_handle_domain_irq_safe(ubus->gpio.irq.domain, 0);
+            uint8_t decRet = proto_pkt_dec_putByte(&ubus->packetDecoder, cp[ret++], pkt);
+            if (decRet != PROTO_PKT_DES_RET_IDLE) {
+                uint8_t errorCode = PROTO_PKT_DES_RET_GET_ERROR_CODE(decRet);
 
-                UBUS_ERR(("Received %zd bytes but there is no pending command - discarding %zd bytes", count, ret));
+                if (errorCode != PROTO_NO_ERROR) {
+                    UBUS_ERR(("Received protocol error: %u", errorCode));
 
-            } else {
-                while (ret < count) {
-                    ProtoPkt *pkt = &cmd->responsePacket;
+                } else {
+                    if (PROTO_IS_RES(pkt->code)) {
+                        unsigned long flags;
 
-                    uint8_t decRet = proto_pkt_dec_putByte(&ubus->packetDecoder, cp[ret++], pkt);
-                    if (decRet != PROTO_PKT_DES_RET_IDLE) {
-                        uint8_t errorCode = PROTO_PKT_DES_RET_GET_ERROR_CODE(decRet);
-
-                        if (errorCode != PROTO_NO_ERROR) {
-                            UBUS_ERR(("Received protocol error: %u for command id: %u",
-                                errorCode, cmd->requestPacket.id
-                            ));
-
-                            cmd->errorCode = -EINVAL;
-
-                        } else {
-                            bool receivedExpectedResponse = false;
-
-                            if (pkt->id != cmd->requestPacket.id) {
-                                UBUS_WARN(("Received successful response for different ID (id %u != %u)", pkt->id, cmd->requestPacket.id));
+                        spin_lock_irqsave(&ubus->workerQueueLock, flags);
+                        {
+                            UbusCmd *cmd = ubus->pendingCmd;
+                            if (! cmd) {
+                                UBUS_ERR(("Received response packet but there is no pending command - discarding %zd bytes", ret));
 
                             } else {
-                                UBUS_DBG(("Received successful response for command %u, id: %u, payloadLength: %u/%u (read %zd of %zd)",
-                                    pkt->code, pkt->id, pkt->payloadUsed, pkt->payloadSize, ret, count
-                                ));
-
-                                // Decode response
-                                proto_res_init(&cmd->response, pkt->payload, pkt->payloadUsed, cmd->requestPacket.code);
-
-                                if (! proto_res_decode(&cmd->response, pkt->payload, pkt->payloadUsed)) {
-                                    UBUS_WARN(("Can't decode incoming command!"));
+                                if (pkt->id != cmd->requestPacket.id) {
+                                    UBUS_WARN(("Received response to command with different ID (id %u != %u)", pkt->id, cmd->requestPacket.id));
 
                                 } else {
-                                    proto_res_assign(&cmd->response, pkt->payload, pkt->payloadUsed);
+                                    UBUS_DBG(("Received successful response for command %u, id: %u, payloadLength: %u/%u (read %zd of %zd)",
+                                        pkt->code, pkt->id, pkt->payloadUsed, pkt->payloadSize, ret, count
+                                    ));
 
-                                    receivedExpectedResponse = true;
+                                    if (! proto_pkt_copy(&cmd->responsePacket, pkt)) {
+                                        UBUS_ERR(("Cant copy temporary packet to command context"));
+
+                                    } else {
+                                        pkt = &cmd->responsePacket;
+
+                                        // Decode response
+                                        proto_res_init(&cmd->response, pkt->payload, pkt->payloadUsed, cmd->requestPacket.code);
+
+                                        if (! proto_res_decode(&cmd->response, pkt->payload, pkt->payloadUsed)) {
+                                            UBUS_WARN(("Can't decode incoming command!"));
+
+                                        } else {
+                                            proto_res_assign(&cmd->response, pkt->payload, pkt->payloadUsed);
+
+                                            complete(&cmd->workerCompletion);
+                                        }
+                                    }
                                 }
                             }
-
-                            if (receivedExpectedResponse) {
-                                complete(&cmd->workerCompletion);
-                            }
                         }
+                        spin_unlock_irqrestore(&ubus->workerQueueLock, flags);
 
-                        proto_pkt_dec_reset(&ubus->packetDecoder, NULL);
+                    } else {
+                        // bcma/driver_gpio.c
+                        // generic_handle_domain_irq_safe(ubus->gpio.irq.domain, 0);
+
+                        UBUS_DBG(("Received command %u from target", pkt->code));
                     }
                 }
+
+                proto_pkt_dec_reset(&ubus->packetDecoder, &ubus->tmpPacket);
             }
         }
-        spin_unlock_irqrestore(&ubus->workerQueueLock, flags);
     }
 
     return ret;
@@ -1327,6 +1353,8 @@ static int _ldiscOpen(struct tty_struct *tty) {
         if (ret == 0) {
             ubus->packetSize = DEFAULT_PACKET_SIZE;
             ubus->pendingCmd = NULL;
+
+            _prepareTmpPacket(ubus);
 
             INIT_LIST_HEAD(&ubus->workerQueue);
             spin_lock_init(&ubus->workerQueueLock);

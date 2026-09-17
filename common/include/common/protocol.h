@@ -16,9 +16,16 @@
 #define PROTO_SYNC_NIBBLE_MASK 0xf0
 #define PROTO_SYNC_NIBBLE      0xd0
 
+#define PROTO_CODE_MASK        0x0f
 #define PROTO_CMD_NIBBLE_MASK  0x07
+#define PROTO_RES_FLAG         0x08
 
 #define PROTO_FRAME_MIN_SIZE 5
+
+#define PROTO_CMD(_code) ((_code) & PROTO_CMD_NIBBLE_MASK)
+#define PROTO_ERR(_code) ((_code) & PROTO_CMD_NIBBLE_MASK)
+#define PROTO_IS_RES(_code) (((_code) & PROTO_RES_FLAG) != 0)
+#define PROTO_IS_CMD(_code) (! PROTO_IS_RES(_code))
 
 /*
  * VLEN field definition.
@@ -36,7 +43,7 @@
  * [ SYNC ][ CTRL ][ ID ][ VLEN ][ PLD ][...][ CRC8 ]
  *
  * SYNC: Synchronization byte. Always 0xd.
- * CTRL: [R...] command (request) or error code (response) MSB bit is reserved for future use. Should be set to 0.
+ * CTRL: [R...] command (request) or error code (response) MSB bit is used as the response marker.
  * ID:   Command unique identifier. Used to recognize response frame.
  * VLEN: Length of payload data (does not include CRC8 field)
  * PLD:  Frame payload
@@ -52,5 +59,6 @@
 #define PROTO_ERROR_INVALID_CRC       0x03
 #define PROTO_ERROR_INVALID_PAYLOAD   0x04
 #define PROTO_ERROR_INVALID_MESSAGE   0x05
+#define PROTO_ERROR_NOT_SUPPORTED     0x06
 
 #endif /* FIRMWARE_INCLUDE_PROTOCOL_H_ */

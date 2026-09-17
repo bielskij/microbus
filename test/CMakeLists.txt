@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.28)
 project(unit_tests_project)
 
 # GoogleTest requires at least C++14
@@ -27,13 +27,13 @@ enable_testing()
 
 set(src_path "${CMAKE_CURRENT_LIST_DIR}/src")
 
-file(GLOB_RECURSE TEST_FILES ${src_path}/*.cpp) 
+file(GLOB_RECURSE TEST_FILES ${src_path}/*.cpp)
 
 add_executable(unit_tests
 	${TEST_FILES}
 )
 
-target_include_directories(unit_tests 
+target_include_directories(unit_tests
 	PRIVATE
 		${CMAKE_CURRENT_LIST_DIR}/include
 )

@@ -43,6 +43,11 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
                 break;
             }
 
+            if (! PROTO_IS_CMD(pkt->code)) {
+                _sendError(hub, PROTO_ERROR_NOT_SUPPORTED);
+                break;
+            }
+
             // Parse, assign request to coming packet
             proto_req_init(&request, pkt->payload, pkt->payloadUsed, pkt->code);
 
@@ -115,6 +120,8 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
             pkt->payloadUsed = proto_res_encode(&response, pkt->payload, pkt->payloadSize);
 
         } while (0);
+
+        pkt->code |= PROTO_RES_FLAG;
 
         proto_pkt_encode(pkt);
 
