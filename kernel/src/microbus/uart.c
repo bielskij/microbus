@@ -1091,6 +1091,15 @@ static int _workerRoutine(void *arg) {
                             if (ret == 0) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
 
+                                {
+                                    struct gpio_desc *desc = gpio_device_get_desc(ubus->gpio.gpiodev, 2);
+                                    if (desc) {
+                                        _boardInfo.irq = gpiod_to_irq(desc);
+                                    }
+                                }
+
+UBUS_LOG(("IRQ: %u", _boardInfo.irq));
+
                                 // TODO: Fixme
                                 i2c_new_client_device(&ubus->i2cAdapter, &_boardInfo);
                             }
