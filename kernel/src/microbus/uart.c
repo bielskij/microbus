@@ -99,6 +99,13 @@ typedef struct _UbusCmd {
     int errorCode;
 } UbusCmd;
 
+typedef struct _I2cDevice {
+    struct i2c_client         *client;
+    struct gpiod_lookup_table *gpioLookup;
+    struct i2c_board_info      info;
+    struct list_head           listItem;
+} I2cDevice;
+
 typedef struct _UbusUart {
     struct tty_struct *tty;
 
@@ -121,15 +128,32 @@ typedef struct _UbusUart {
     ProtoPkt tmpPacket;
 
     struct i2c_adapter   i2cAdapter;
+    struct list_head     i2cDevices;
+    struct mutex         i2cDevicesLock;
+
     struct w1_bus_master w1Master;
     char                 w1MasterId[64];
     dev_t                w1MasterCharDev;
     struct cdev          w1MasterCharCdev;
     struct class        *w1MasterClass;
 
-    struct gpio_chip           gpio;
-    struct gpiod_lookup_table *gpioLookup;
+    struct gpio_chip gpio;
 } UbusUart;
+
+static I2cDevice *_i2cDeviceAlloc(const char *moduleName, unsigned short addr) {
+    I2cDevice *ret = kzalloc(sizeof(*ret), GFP_KERNEL);
+
+    INIT_LIST_HEAD(&ret->listItem);
+
+    ret->client     = NULL;
+    ret->gpioLookup = NULL;
+
+    ret->info.addr = addr;
+
+    strncpy(ret->info.type, moduleName, I2C_NAME_SIZE);
+
+    return ret;
+}
 
 static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
     INIT_LIST_HEAD(&cmd->list);
@@ -1050,23 +1074,23 @@ static int _workerRoutine(void *arg) {
 
                             UBUS_DBG(("Registering new gpio device in kernel"));
 
-                            ubus->gpioLookup = kzalloc(struct_size(ubus->gpioLookup, table, gpioCount + 1), GFP_KERNEL);
-                            if (ubus->gpioLookup == NULL) {
-                                UBUS_ERR(("Cannot allocate memory for gpio mapping"));
+                            // ubus->gpioLookup = kzalloc(struct_size(ubus->gpioLookup, table, gpioCount + 1), GFP_KERNEL);
+                            // if (ubus->gpioLookup == NULL) {
+                            //     UBUS_ERR(("Cannot allocate memory for gpio mapping"));
 
-                            } else {
+                            // } else {
                                 struct gpio_chip *gpio = &ubus->gpio;
 
                                 gpio->ngpio = gpioCount;
 
-                                {
-                                    ubus->gpioLookup->dev_id = "1-0028";
+                                // {
+                                //     ubus->gpioLookup->dev_id = "1-0028";
 
-                                    ubus->gpioLookup->table[0] =  GPIO_LOOKUP("microbus-gpio", 0, "enable",   GPIO_ACTIVE_HIGH);
-                                    ubus->gpioLookup->table[1] =  GPIO_LOOKUP("microbus-gpio", 1, "firmware", GPIO_ACTIVE_HIGH);
+                                //     ubus->gpioLookup->table[0] =  GPIO_LOOKUP("microbus-gpio", 0, "enable",   GPIO_ACTIVE_HIGH);
+                                //     ubus->gpioLookup->table[1] =  GPIO_LOOKUP("microbus-gpio", 1, "firmware", GPIO_ACTIVE_HIGH);
 
-                                    gpiod_add_lookup_table(ubus->gpioLookup);
-                                }
+                                //     gpiod_add_lookup_table(ubus->gpioLookup);
+                                // }
 
                                 gpio_irq_chip_set_chip(&gpio->irq, &_gpioIrqChip);
 
@@ -1077,11 +1101,11 @@ static int _workerRoutine(void *arg) {
                                 } else {
                                     UBUS_ERR(("Cannot register gpio chip (%d)", ret));
 
-                                    kfree(ubus->gpioLookup);
+                                    // kfree(ubus->gpioLookup);
 
-                                    ubus->gpioLookup = NULL;
+                                    // ubus->gpioLookup = NULL;
                                 }
-                            }
+                            // }
                         }
 
                         if ((info->features & PROTO_FEATURE_I2C) != 0) {
@@ -1091,17 +1115,18 @@ static int _workerRoutine(void *arg) {
                             if (ret == 0) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
 
-                                {
-                                    struct gpio_desc *desc = gpio_device_get_desc(ubus->gpio.gpiodev, 2);
-                                    if (desc) {
-                                        _boardInfo.irq = gpiod_to_irq(desc);
-                                    }
-                                }
+//                                 {
+//                                     struct gpio_desc *desc = gpio_device_get_desc(ubus->gpio.gpiodev, 2);
+//                                     if (desc) {
+//                                         _boardInfo.irq = gpiod_to_irq(desc);
+//                                     }
+//                                 }
 
-UBUS_LOG(("IRQ: %u", _boardInfo.irq));
+// UBUS_LOG(("IRQ: %u", _boardInfo.irq));
 
-                                // TODO: Fixme
-                                i2c_new_client_device(&ubus->i2cAdapter, &_boardInfo);
+//                                 // TODO: Fixme
+                                // i2c_new_client_device(&ubus->i2cAdapter, &_boardInfo);
+// i2c_unregister_device()
                             }
                         }
 
@@ -1307,6 +1332,7 @@ static void _ldiscCleanup(UbusUart **ubus) {
     }
 
     i2c_del_adapter(&b->i2cAdapter);
+    mutex_destroy(&b->i2cDevicesLock);
 
     if (b->w1Master.data != NULL) {
         w1_remove_master_device(&b->w1Master);
@@ -1317,15 +1343,11 @@ static void _ldiscCleanup(UbusUart **ubus) {
         unregister_chrdev_region(b->w1MasterCharDev, 1);
     }
 
-    if (b->gpioLookup) {
-        gpiod_remove_lookup_table(b->gpioLookup);
+    // if (b->gpioLookup) {
+        // gpiod_remove_lookup_table(b->gpioLookup);
 
         gpiochip_remove(&b->gpio);
-
-        kfree(b->gpioLookup);
-
-        b->gpioLookup = NULL;
-    }
+    // }
 
     if (b->worker) {
         UBUS_DBG(("Stopping ubus worker"));
@@ -1389,6 +1411,9 @@ static int _ldiscOpen(struct tty_struct *tty) {
             adapter->algo      = &_ubusI2cAlgo;
 
             strncpy(adapter->name, "microbus-i2c", sizeof(adapter->name));
+
+            INIT_LIST_HEAD(&ubus->i2cDevices);
+            mutex_init(&ubus->i2cDevicesLock);
         }
 
         if (ret == 0) {
@@ -1458,6 +1483,32 @@ static void _ldiscClose(struct tty_struct *tty) {
     _ldiscCleanup((UbusUart **) &tty->disc_data);
 }
 
+static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg) {
+    int ret = 0;
+
+    UBUS_DBG(("_ldiscIoctl(): CALL"));
+
+    switch (cmd) {
+        case MICROBUS_IOC_GET_INFORMATION:
+            {
+                MicrobusInformation info;
+
+                info.versionMajor = MICROBUS_ABI_VERSION_MAJOR;
+                info.versionMinor = MICROBUS_ABI_VERSION_MINOR;
+
+                if (copy_to_user((void *) arg, &info, sizeof(info))) {
+                    ret = -EFAULT;
+                }
+            }
+            break;
+
+        default:
+            ret = -ENOTTY;
+    }
+
+    return ret;
+}
+
 static struct tty_ldisc_ops _ldiscOps = {
     .owner = THIS_MODULE,
     .name  = "Microbus over UART line discipline",
@@ -1465,7 +1516,8 @@ static struct tty_ldisc_ops _ldiscOps = {
 
     .open         = _ldiscOpen,
     .close        = _ldiscClose,
-    .receive_buf2 = _ldiscReceive2
+    .receive_buf2 = _ldiscReceive2,
+    .ioctl        = _ldiscIoctl
 };
 
 static int __init _ubus_uart_init(void) {

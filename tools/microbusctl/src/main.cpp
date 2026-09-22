@@ -7,6 +7,10 @@
 
 #include <sys/ioctl.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+
+#include "microbus/ioctl.h"
 
 namespace fs = std::filesystem;
 
@@ -200,95 +204,109 @@ int main(int argc, char* argv[]) {
     int ret = EXIT_SUCCESS;
 
     {
+        int fd = -1;
+
         do {
+            std::string devicePath;
 
-        } while (0);
-    }
+            if (argc < 2) {
+                _showUsage();
 
-    {
-        std::string devicePath;
+                ret = EXIT_FAILURE;
+                break;
+            }
 
-        if (argc < 2) {
-            _showUsage();
-            ret = EXIT_FAILURE;
-        }
-
-        if (ret == EXIT_SUCCESS) {
             int arg = 1;
 
-            if (ret == EXIT_SUCCESS) {
-                while (arg < argc) {
-                    const std::string option = argv[arg];
+            while (arg < argc) {
+                const std::string option = argv[arg];
 
-                    if (option == "-d" || option == "--device") {
-                        if (arg + 1 >= argc) {
-                            std::cerr << "-d|--device requires an argument" << std::endl << std::endl;
+                if (option == "-d" || option == "--device") {
+                    if (arg + 1 >= argc) {
+                        std::cerr << "-d|--device requires an argument" << std::endl << std::endl;
 
-                            _showUsage();
-                            ret = EXIT_FAILURE;
-                            break;
-                        }
+                        _showUsage();
 
-                        devicePath = argv[++arg];
-                        ++arg;
-
-                        continue;
+                        ret = EXIT_FAILURE;
+                        break;
                     }
 
+                    devicePath = argv[++arg];
+                    ++arg;
+
+                    continue;
+                }
+
+                break;
+            }
+
+            if (ret != EXIT_SUCCESS) {
+                break;
+            }
+
+            if (devicePath.empty()) {
+                std::cerr << "error: --device is required" << std::endl << std::endl;
+
+                _showUsage();
+
+                ret = EXIT_FAILURE;
+                break;
+            }
+
+            if (! fs::exists(devicePath) || ! fs::is_character_file(devicePath)) {
+                std::cerr << "error: device " + devicePath + " does not exists or is not a character device" << std::endl;
+
+                _showUsage();
+
+                ret = EXIT_FAILURE;
+                break;
+            }
+
+            if (arg >= argc) {
+                _showUsage();
+
+                ret = EXIT_FAILURE;
+                break;
+            }
+
+            fd = open(devicePath.c_str(), O_RDWR);
+            if (fd < 0) {
+                std::cerr << "error: can't open device " << devicePath << std::endl;
+
+                _showUsage();
+
+                ret = EXIT_FAILURE;
+                break;
+            }
+
+            {
+                MicrobusInformation info;
+
+                if (ioctl(fd, MICROBUS_IOC_GET_INFORMATION, &info) < 0) {
+                    std::cerr << "error: Failed to retrieve Microbus ABI version" << std::endl;
+
+                    ret = EXIT_FAILURE;
+                    break;
+                }
+
+                if (
+                    info.versionMajor != MICROBUS_ABI_VERSION_MAJOR ||
+                    info.versionMinor != MICROBUS_ABI_VERSION_MINOR
+                ) {
+                    std::cerr << "error: Unsupported Microbus ABI version "
+                        << static_cast<int>(info.versionMajor) << "."
+                        << static_cast<int>(info.versionMinor) << std::endl;
+
+                    ret = EXIT_FAILURE;
                     break;
                 }
             }
 
-            if (ret == EXIT_SUCCESS) {
-                if (devicePath.empty()) {
-                    std::cerr << "error: --device is required" << std::endl << std::endl;
+        } while (0);
 
-                    _showUsage();
-                    ret = EXIT_FAILURE;
-
-                } else if (! fs::exists(devicePath) || ! fs::is_character_file(devicePath)) {
-                    std::cerr << "error: device " + devicePath + " does not exists or is not a character device" << std::endl;
-
-                    _showUsage();
-                    ret = EXIT_FAILURE;
-                }
-            }
-
-            if (ret == EXIT_SUCCESS) {
-                if (arg >= argc) {
-                    _showUsage();
-                    ret = EXIT_FAILURE;
-                }
-            }
-
-            if (ret == EXIT_SUCCESS) {
-                int fd = open(devicePath.c_str(), O_RDWR);
-                if (fd < 0) {
-                    std::cerr << "error: can't open device " << devicePath << std::endl;
-
-                    _showUsage();
-                    ret = EXIT_FAILURE;
-                }
-
-                if (ret == EXIT_SUCCESS) {
-
-                }
-
-                if (fd >= 0) {
-                    close(fd);
-                }
-            }
+        if (fd >= 0) {
+            close(fd);
         }
-    }
-
-    try {
-
-        // _showUsage();
-
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-
-        ret = EXIT_FAILURE;
     }
 
     return ret;
