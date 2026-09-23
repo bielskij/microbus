@@ -4,9 +4,6 @@
 #ifndef FIRMWARE_INCLUDE_PROTOCOL_H_
 #define FIRMWARE_INCLUDE_PROTOCOL_H_
 
-#define PROTO_VERSION_MAJOR 1
-#define PROTO_VERSION_MINOR 0
-
 /*
  * CRC8 start value and polynomial definition.
  */

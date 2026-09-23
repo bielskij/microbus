@@ -300,6 +300,14 @@ int main(int argc, char* argv[]) {
                     ret = EXIT_FAILURE;
                     break;
                 }
+
+                std::cout << "Have microbus interface with ABI version "
+                    << std::to_string(info.versionMajor) << "." << std::to_string(info.versionMinor)
+                    << " features:"
+                    << ((info.features & MICROBUS_FEATURE_FLAG_I2C)  ? " i2c" : "")
+                    << ((info.features & MICROBUS_FEATURE_FLAG_OW)   ? " ow" : "")
+                    << ((info.features & MICROBUS_FEATURE_FLAG_GPIO) ? " gpio" : "")
+                    << std::endl;
             }
 
         } while (0);

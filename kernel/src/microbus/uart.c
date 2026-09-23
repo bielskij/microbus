@@ -127,6 +127,8 @@ typedef struct _UbusUart {
     size_t   tmpPacketBufferSize;
     ProtoPkt tmpPacket;
 
+    MicrobusInformation information;
+
     struct i2c_adapter   i2cAdapter;
     struct list_head     i2cDevices;
     struct mutex         i2cDevicesLock;
@@ -1098,6 +1100,8 @@ static int _workerRoutine(void *arg) {
                                 if (! ret) {
                                     UBUS_LOG(("Created new gpio chip"));
 
+                                    ubus->information.features |= MICROBUS_FEATURE_FLAG_GPIO;
+
                                 } else {
                                     UBUS_ERR(("Cannot register gpio chip (%d)", ret));
 
@@ -1114,6 +1118,8 @@ static int _workerRoutine(void *arg) {
                             ret = i2c_add_adapter(&ubus->i2cAdapter);
                             if (ret == 0) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
+
+                                ubus->information.features |= MICROBUS_FEATURE_FLAG_I2C;
 
 //                                 {
 //                                     struct gpio_desc *desc = gpio_device_get_desc(ubus->gpio.gpiodev, 2);
@@ -1179,6 +1185,9 @@ static int _workerRoutine(void *arg) {
                                                 class_destroy(ubus->w1MasterClass);
                                                 cdev_del(&ubus->w1MasterCharCdev);
                                                 unregister_chrdev_region(ubus->w1MasterCharDev, 1);
+
+                                            } else {
+                                                ubus->information.features |= MICROBUS_FEATURE_FLAG_OW;
                                             }
                                         }
                                     }
@@ -1331,7 +1340,10 @@ static void _ldiscCleanup(UbusUart **ubus) {
         return;
     }
 
-    i2c_del_adapter(&b->i2cAdapter);
+    if (b->information.features & MICROBUS_FEATURE_FLAG_I2C) {
+        i2c_del_adapter(&b->i2cAdapter);
+    }
+
     mutex_destroy(&b->i2cDevicesLock);
 
     if (b->w1Master.data != NULL) {
@@ -1382,6 +1394,19 @@ static int _ldiscOpen(struct tty_struct *tty) {
         }
 
         if (ret == 0) {
+            {
+                MicrobusInformation *i = &ubus->information;
+
+                i->versionMajor = MICROBUS_ABI_VERSION_MAJOR;
+                i->versionMinor = MICROBUS_ABI_VERSION_MINOR;
+
+                i->features = 0;
+
+                i->i2c.reserved  = 0;
+                i->ow.reserved   = 0;
+                i->gpio.pinCount = 0;
+            }
+
             ubus->packetSize = DEFAULT_PACKET_SIZE;
             ubus->pendingCmd = NULL;
 
@@ -1486,24 +1511,21 @@ static void _ldiscClose(struct tty_struct *tty) {
 static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg) {
     int ret = 0;
 
-    UBUS_DBG(("_ldiscIoctl(): CALL"));
+    {
+        UbusUart *ubus = (UbusUart *) tty->disc_data;
 
-    switch (cmd) {
-        case MICROBUS_IOC_GET_INFORMATION:
-            {
-                MicrobusInformation info;
+        UBUS_DBG(("_ldiscIoctl(): CALL"));
 
-                info.versionMajor = MICROBUS_ABI_VERSION_MAJOR;
-                info.versionMinor = MICROBUS_ABI_VERSION_MINOR;
-
-                if (copy_to_user((void *) arg, &info, sizeof(info))) {
+        switch (cmd) {
+            case MICROBUS_IOC_GET_INFORMATION:
+                if (copy_to_user((void *) arg, &ubus->information, sizeof(ubus->information))) {
                     ret = -EFAULT;
                 }
-            }
-            break;
+                break;
 
-        default:
-            ret = -ENOTTY;
+            default:
+                ret = -ENOTTY;
+        }
     }
 
     return ret;

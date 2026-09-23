@@ -4,6 +4,9 @@
 #ifndef FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_
 #define FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_
 
+#define PROTO_VERSION_MAJOR 1
+#define PROTO_VERSION_MINOR 1
+
 /*
  * 1) CMD_GET_INFO.
  *
@@ -15,8 +18,8 @@
  *  - No payload
  *
  * Response payload:
- *  [    4b   ][    4b   ][   1/2B   ][   1B   ]
- *  [ VER_MAJ ][ VER_MIN ][ PLD_SIZE ][FEATURES]
+ *  [    4b   ][    4b   ][   1/2B   ][   1B   ][    1B    ]
+ *  [ VER_MAJ ][ VER_MIN ][ PLD_SIZE ][FEATURES][GPIO_COUNT]
  */
 #define PROTO_CMD_GET_INFO 0x0
 

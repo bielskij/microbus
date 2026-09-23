@@ -21,6 +21,8 @@ void proto_res_init(ProtoRes *response, void *memory, uint16_t memorySize, uint8
 
                 info->packetSize = 0;
                 info->features   = 0;
+
+                info->gpio.count = 0;
             }
             break;
 
@@ -111,6 +113,10 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                     ret += proto_int_val_encode(info->packetSize, PTR_U8(memory) + ret);
 
                     PTR_U8(memory)[ret++] = info->features;
+
+                    if ((info->features & PROTO_FEATURE_GPIO) != 0) {
+                        PTR_U8(memory)[ret++] = info->gpio.count;
+                    }
                 }
                 break;
 
@@ -223,6 +229,18 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
 
                             memoryP++;
                             memorySize--;
+                        }
+                    }
+
+                    if (ret) {
+                        if ((info->features & PROTO_FEATURE_GPIO) != 0) {
+                            ret = memorySize != 0;
+                            if (ret) {
+                                info->gpio.count = *memoryP;
+
+                                memoryP++;
+                                memorySize--;
+                            }
                         }
                     }
                 }

@@ -14,6 +14,10 @@
 
 #define MICROBUS_RESOURCE_INTERRUPT_SOURCE "interrupt-source"
 
+#define MICROBUS_FEATURE_FLAG_I2C  (1 << 0)
+#define MICROBUS_FEATURE_FLAG_OW   (1 << 1)
+#define MICROBUS_FEATURE_FLAG_GPIO (1 << 2)
+
 enum MicrobusInterface {
     I2C,
     OW
@@ -29,9 +33,26 @@ struct MicrobusSearchStep {
     __u8  reserved[3];
 };
 
+typedef struct _MicrobusI2cInformation {
+    __u8 reserved;
+} MicrobusI2cInformation;
+
+typedef struct _MicrobusOwInformation {
+    __u8 reserved;
+} MicrobusOwInformation;
+
+typedef struct _MicrobusGpioInformation {
+    __u8 pinCount;
+} MicrobusGpioInformation;
+
 typedef struct _MicrobusInformation {
     __u8 versionMajor;
     __u8 versionMinor;
+    __u8 features;
+
+    MicrobusI2cInformation  i2c;
+    MicrobusOwInformation   ow;
+    MicrobusGpioInformation gpio;
 } MicrobusInformation;
 
 typedef struct _MicrobusResource {
