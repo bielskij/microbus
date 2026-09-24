@@ -10,13 +10,15 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include <spdlog/spdlog.h>
+
 #include "microbus/ioctl.h"
 
 namespace fs = std::filesystem;
 
 static void _showUsage() {
     std::cout
-        << "Usage:" << std::endl
+        << std::endl << "Usage:" << std::endl
         << std::endl
         << "  microbusctl -d|--device <tty_device> i2c attach <address> <driver> [resource=value ...]" << std::endl
         << "  microbusctl -d|--device <tty_device> i2c dettach <address>" << std::endl
@@ -206,6 +208,9 @@ int main(int argc, char* argv[]) {
     {
         int fd = -1;
 
+        spdlog::set_level(spdlog::level::info);
+        spdlog::set_pattern("%v");
+
         do {
             std::string devicePath;
 
@@ -223,7 +228,7 @@ int main(int argc, char* argv[]) {
 
                 if (option == "-d" || option == "--device") {
                     if (arg + 1 >= argc) {
-                        std::cerr << "-d|--device requires an argument" << std::endl << std::endl;
+                        spdlog::error("-d|--device requires an argument\n");
 
                         _showUsage();
 
@@ -231,9 +236,15 @@ int main(int argc, char* argv[]) {
                         break;
                     }
 
-                    devicePath = argv[++arg];
-                    ++arg;
+                    devicePath = argv[++arg]; ++arg;
 
+                    continue;
+
+                } else if (option == "-v" || option == "--verbose") {
+                    spdlog::set_level(spdlog::level::debug);
+                    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S] [%l] %v");
+
+                    ++arg;
                     continue;
                 }
 
@@ -245,7 +256,7 @@ int main(int argc, char* argv[]) {
             }
 
             if (devicePath.empty()) {
-                std::cerr << "error: --device is required" << std::endl << std::endl;
+                spdlog::error("error: --device is required");
 
                 _showUsage();
 
@@ -254,7 +265,7 @@ int main(int argc, char* argv[]) {
             }
 
             if (! fs::exists(devicePath) || ! fs::is_character_file(devicePath)) {
-                std::cerr << "error: device " + devicePath + " does not exists or is not a character device" << std::endl;
+                spdlog::error("error: device {} does not exists or is not a character device");
 
                 _showUsage();
 
@@ -308,6 +319,75 @@ int main(int argc, char* argv[]) {
                     << ((info.features & MICROBUS_FEATURE_FLAG_OW)   ? " ow" : "")
                     << ((info.features & MICROBUS_FEATURE_FLAG_GPIO) ? " gpio" : "")
                     << std::endl;
+
+                std::string device = argv[arg++];
+
+                if (device == "i2c") {
+                    std::string command;
+
+                    if (arg >= argc) {
+                        _showUsage();
+
+                        ret = EXIT_FAILURE;
+                        break;
+                    }
+
+                    command = argv[arg++];
+
+                    if (command == "attach") {
+                        std::string driver;
+                        uint16_t    address;
+
+                        if (arg + 1 >= argc) {
+                            spdlog::error("The command '{}' requires at least driver name and device address", command);
+
+                            _showUsage();
+
+                            ret = EXIT_FAILURE;
+                            break;
+                        }
+
+                        driver  = argv[arg++];
+                        address = std::stoul(argv[arg++], 0, 0);
+
+                        spdlog::info("Attaching a slave device of address {} (0x{:02X}) with driver '{}'", address, address, driver);
+
+                        {
+                            MicrobusI2cAttachParameters params;
+
+                            memset(&params, 0, sizeof(params));
+
+                            params.address = address;
+
+                            strncpy(params.driver, driver.c_str(), MICROBUS_NAME_LEN - 1);
+
+                            if (ioctl(fd, MICROBUS_IOC_I2C_ATTACH, &params) != 0) {
+                                spdlog::error("Unable to attach new {} device.", device);
+
+                            } else {
+                                spdlog::info("New {} device was succesfully attached", device);
+                            }
+                        }
+
+                    } else if (command == "detach") {
+
+                    } else {
+                        spdlog::error("Provided not supported command '{}' for device of type: '{}'", command, device);
+
+                        _showUsage();
+
+                        ret = EXIT_FAILURE;
+                        break;
+                    }
+
+                } else {
+                    spdlog::error("Provided not supported device type '{}'", device);
+
+                    _showUsage();
+
+                    ret = EXIT_FAILURE;
+                    break;
+                }
             }
 
         } while (0);

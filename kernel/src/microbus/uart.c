@@ -1341,6 +1341,7 @@ static void _ldiscCleanup(UbusUart **ubus) {
     }
 
     if (b->information.features & MICROBUS_FEATURE_FLAG_I2C) {
+        // TODO: Remove all attached devices
         i2c_del_adapter(&b->i2cAdapter);
     }
 
@@ -1358,8 +1359,9 @@ static void _ldiscCleanup(UbusUart **ubus) {
     // if (b->gpioLookup) {
         // gpiod_remove_lookup_table(b->gpioLookup);
 
+    if (b->information.features & MICROBUS_FEATURE_FLAG_GPIO) {
         gpiochip_remove(&b->gpio);
-    // }
+    }
 
     if (b->worker) {
         UBUS_DBG(("Stopping ubus worker"));
