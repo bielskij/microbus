@@ -99,11 +99,20 @@ typedef struct _UbusCmd {
     int errorCode;
 } UbusCmd;
 
+typedef struct _GpioMapping {
+    char key[MICROBUS_NAME_LEN];
+    char name[MICROBUS_NAME_LEN];
+} GpioMapping;
+
 typedef struct _I2cDevice {
     struct i2c_client         *client;
     struct gpiod_lookup_table *gpioLookup;
+    char                       devId[MICROBUS_NAME_LEN];
     struct i2c_board_info      info;
     struct list_head           listItem;
+
+    GpioMapping gpioMappings[MICROBUS_MAX_RESOURCES];
+
 } I2cDevice;
 
 typedef struct _UbusUart {
@@ -1516,12 +1525,140 @@ static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long a
     {
         UbusUart *ubus = (UbusUart *) tty->disc_data;
 
-        UBUS_DBG(("_ldiscIoctl(): CALL"));
-
         switch (cmd) {
             case MICROBUS_IOC_GET_INFORMATION:
-                if (copy_to_user((void *) arg, &ubus->information, sizeof(ubus->information))) {
-                    ret = -EFAULT;
+                {
+                    UBUS_DBG(("_ldiscIoctl(): MICROBUS_IOC_GET_INFORMATION"));
+
+                    if (copy_to_user((void *) arg, &ubus->information, sizeof(ubus->information))) {
+                        ret = -EFAULT;
+                    }
+                }
+                break;
+
+            case MICROBUS_IOC_I2C_ATTACH:
+                {
+                    MicrobusI2cAttachParameters params;
+
+                    UBUS_DBG(("_ldiscIoctl(): MICROBUS_IOC_I2C_ATTACH"));
+
+                    if (copy_from_user(&params, (void *) arg, sizeof(params))) {
+                        UBUS_ERR(("Unable to copy parameters from user"));
+
+                        ret = -EFAULT;
+
+                    } else {
+                        int irq = 0;
+
+                        if (params.resourceCount > 0) {
+                            __u16 count = 0;
+
+                            for (__u16 i = 0; i < params.resourceCount; i++) {
+                                MicrobusResource *res = &params.resources[params.resourceCount];
+
+                                if (strncmp(res->name, "interrupt-source", MICROBUS_NAME_LEN) == 0) {
+                                    struct gpio_desc *desc = gpio_device_get_desc(ubus->gpio.gpiodev, 2);
+                                    if (desc) {
+                                        irq = gpiod_to_irq(desc);
+                                    }
+
+                                } else {
+                                    count++;
+                                }
+                            }
+
+                            I2cDevice *dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+
+                            INIT_LIST_HEAD(&dev->listItem);
+
+                            if (count == 0) {
+                                dev->gpioLookup = NULL;
+
+                            } else {
+                                dev->gpioLookup = kzalloc(struct_size(dev->gpioLookup, table, count + 1), GFP_KERNEL);
+
+                                snprintf(dev->devId, MICROBUS_NAME_LEN, "%u-%04x", ubus->i2cAdapter.nr, params.address);
+
+                                dev->gpioLookup->dev_id = dev->devId;
+
+                                count = 0;
+                                for (__u16 i = 0; i < params.resourceCount; i++) {
+                                    MicrobusResource *res = &params.resources[params.resourceCount];
+
+                                    if (strncmp(res->name, "interrupt-source", MICROBUS_NAME_LEN) != 0) {
+                                        GpioMapping *m = &dev->gpioMappings[count];
+
+                                        snprintf(m->key, MICROBUS_NAME_LEN, "microbus-%s", res->name);
+
+                                        strncpy(m->name, res->name, MICROBUS_NAME_LEN);
+
+                                        dev->gpioLookup->table[count++] = GPIO_LOOKUP(m->key, res->index, m->name, GPIO_ACTIVE_HIGH);
+                                    }
+                                }
+
+                                gpiod_add_lookup_table(dev->gpioLookup);
+
+                                                            // ubus->gpioLookup = kzalloc(struct_size(ubus->gpioLookup, table, gpioCount + 1), GFP_KERNEL);
+                            // if (ubus->gpioLookup == NULL) {
+                            //     UBUS_ERR(("Cannot allocate memory for gpio mapping"));
+
+                            // } else {
+                                // struct gpio_chip *gpio = &ubus->gpio;
+
+                                // gpio->ngpio = gpioCount;
+
+                                // {
+                                //     ubus->gpioLookup->dev_id = "1-0028";
+
+                                //     ubus->gpioLookup->table[0] =  GPIO_LOOKUP("microbus-gpio", 0, "enable",   GPIO_ACTIVE_HIGH);
+                                //     ubus->gpioLookup->table[1] =  GPIO_LOOKUP("microbus-gpio", 1, "firmware", GPIO_ACTIVE_HIGH);
+
+                                    // gpiod_add_lookup_table(ubus->gpioLookup);
+                                // }
+
+                                // gpio_irq_chip_set_chip(&gpio->irq, &_gpioIrqChip);
+
+                                // ret = gpiochip_add_data(gpio, ubus);
+
+                            }
+
+                            mutex_lock(&ubus->i2cDevicesLock);
+                            {
+                                list_add_tail(&dev->listItem, &ubus->i2cDevices);
+                            }
+                            mutex_unlock(&ubus->i2cDevicesLock);
+                        }
+                    }
+                }
+                break;
+
+            case MICROBUS_IOC_I2C_DETACH:
+                {
+                    MicrobusI2cDetachParameters params;
+
+                    UBUS_DBG(("_ldiscIoctl(): MICROBUS_IOC_I2C_DETACH"));
+
+                    if (copy_from_user(&params, (void *) arg, sizeof(params))) {
+                        UBUS_ERR(("Unable to copy parameters from user"));
+
+                        ret = -EFAULT;
+
+                    } else {
+                        mutex_lock(&ubus->i2cDevicesLock);
+                        {
+                            I2cDevice *dev;
+                            I2cDevice *tmp;
+
+                            list_for_each_entry_safe(dev, tmp, &ubus->i2cDevices, listItem) {
+                                if (dev->info.addr == params.address) {
+                                    // TODO: Unregister
+
+                                    list_del(&dev->listItem);
+                                }
+                            }
+                        }
+                        mutex_unlock(&ubus->i2cDevicesLock);
+                    }
                 }
                 break;
 

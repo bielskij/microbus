@@ -361,6 +361,40 @@ int main(int argc, char* argv[]) {
 
                             strncpy(params.driver, driver.c_str(), MICROBUS_NAME_LEN - 1);
 
+                            while (arg < argc) {
+                                std::string res = argv[arg++];
+
+                                const auto equal = res.find('=');
+                                if (equal == std::string::npos) {
+                                    ret = EXIT_FAILURE;
+                                    break;
+                                }
+
+                                auto &ioRes = params.resources[params.resourceCount++];
+
+                                strncpy(ioRes.name, res.c_str(), std::min(equal, (size_t) MICROBUS_NAME_LEN));
+
+                                {
+                                    std::string resourceParams = res.substr(equal + 1);
+
+                                    auto delmiter = resourceParams.find(':');
+
+                                    if (resourceParams.substr(0, delmiter) == "gpio") {
+                                        ioRes.interface = MicrobusInterface::GPIO;
+                                        ioRes.index     = std::stoi(resourceParams.substr(delmiter + 1));
+
+                                    } else {
+                                        spdlog::error("Unknown interface!");
+                                    }
+                                }
+
+                                spdlog::info("res: '{}', interface: {}, index: {}", ioRes.name, ioRes.interface, ioRes.index);
+                            }
+
+                            if (ret != EXIT_SUCCESS) {
+                                break;
+                            }
+
                             if (ioctl(fd, MICROBUS_IOC_I2C_ATTACH, &params) != 0) {
                                 spdlog::error("Unable to attach new {} device.", device);
 

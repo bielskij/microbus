@@ -9,7 +9,7 @@
 #define MICROBUS_ABI_VERSION_MAJOR 1
 #define MICROBUS_ABI_VERSION_MINOR 0
 
-#define MICROBUS_MAX_RESOURCES 16
+#define MICROBUS_MAX_RESOURCES 8
 #define MICROBUS_NAME_LEN      64
 
 #define MICROBUS_RESOURCE_INTERRUPT_SOURCE "interrupt-source"
@@ -20,7 +20,8 @@
 
 enum MicrobusInterface {
     I2C,
-    OW
+    OW,
+    GPIO
 };
 
 struct MicrobusSearchStep {
@@ -56,8 +57,9 @@ typedef struct _MicrobusInformation {
 } MicrobusInformation;
 
 typedef struct _MicrobusResource {
-    __u32 interface;
-    char  name[MICROBUS_NAME_LEN];
+    __u8 interface;
+    __u8 index;
+    char name[MICROBUS_NAME_LEN];
 } MicrobusResource;
 
 typedef struct _MicrobusI2cAttachParameters {
@@ -68,6 +70,10 @@ typedef struct _MicrobusI2cAttachParameters {
     __u16            resourceCount;
 } MicrobusI2cAttachParameters;
 
+typedef struct _MicrobusI2cDetachParameters {
+    __u16 address;
+} MicrobusI2cDetachParameters;
+
 #define MICROBUS_IOC_GET_INFORMATION _IOR(MICROBUS_IOC_MAGIC, 0, MicrobusInformation)
 
 #define MICROBUS_IOC_RESET           _IOR (MICROBUS_IOC_MAGIC, 0, __u8)
@@ -77,5 +83,7 @@ typedef struct _MicrobusI2cAttachParameters {
 #define MICROBUS_IOC_SEARCH_STEP     _IOWR(MICROBUS_IOC_MAGIC, 2, struct MicrobusSearchStep)
 
 #define MICROBUS_IOC_I2C_ATTACH      _IOW (MICROBUS_IOC_MAGIC, 3, MicrobusI2cAttachParameters)
+
+#define MICROBUS_IOC_I2C_DETACH      _IOW (MICROBUS_IOC_MAGIC, 4, MicrobusI2cDetachParameters)
 
 #endif /* __MICROBUS_IOCTL_H__ */
