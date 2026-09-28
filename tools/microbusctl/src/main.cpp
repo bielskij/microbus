@@ -347,8 +347,8 @@ int main(int argc, char* argv[]) {
                             break;
                         }
 
-                        driver  = argv[arg++];
                         address = std::stoul(argv[arg++], 0, 0);
+                        driver  = argv[arg++];
 
                         spdlog::info("Attaching a slave device of address {} (0x{:02X}) with driver '{}'", address, address, driver);
 
@@ -404,6 +404,17 @@ int main(int argc, char* argv[]) {
                         }
 
                     } else if (command == "detach") {
+                        MicrobusI2cDetachParameters params;
+
+                        memset(&params, 0, sizeof(params));
+
+                        {
+                            params.address = std::stoul(argv[arg++], 0, 0);
+                        }
+
+                        if (ioctl(fd, MICROBUS_IOC_I2C_DETACH, &params)) {
+                            spdlog::error("Unable to detach {} device at address 0x{:02X}.", device, params.address);
+                        }
 
                     } else {
                         spdlog::error("Provided not supported command '{}' for device of type: '{}'", command, device);
