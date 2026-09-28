@@ -102,5 +102,33 @@
 #define PROTO_OW_STATUS_SEARCH_DONE_EMPTY  3
 #define PROTO_OW_STATUS_SEARCH_DONE_FOUND  4
 
+/*
+ * 4) PROTO_CMD_GPIO_CONTROL
+ *
+ * Request
+ * [ 4b ][ 4b  ]
+ * [TYPE][ IDX ]
+ *
+ * * SET_DIRECTION
+ * [ 6b ][ 1b  ][ 1b ]
+ * [ R  ][ OUT ][ HI ]
+ *
+ * * SET_VALUE
+ * [ 7b ][ 1b ]
+ * [ R  ][ HI ]
+ *
+ * Response
+ * * GET_VALUE
+ */
+
+#define PROTO_CMD_GPIO_CONTROL 0x3
+
+#define PROTO_GPIO_CONTROL_FLAG_HI  (1 << 0)
+#define PROTO_GPIO_CONTROL_FLAG_OUT (1 << 1)
+
+#define PROTO_GPIO_CONTROL_TYPE_UNKNOWN       (0)
+#define PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION (1)
+#define PROTO_GPIO_CONTROL_TYPE_SET_VALUE     (2)
+#define PROTO_GPIO_CONTROL_TYPE_GET_VALUE     (3)
 
 #endif /* FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_ */

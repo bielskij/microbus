@@ -39,6 +39,16 @@ void proto_req_init(ProtoReq *request, void *memory, uint16_t memorySize, uint8_
 
                 t->data.transfer.dataSize = memorySize - 1;
             }
+            break;
+
+        case PROTO_CMD_GPIO_CONTROL:
+            {
+                ProtoReqGpioControl *t = &request->request.gpioControl;
+
+                t->type  = PROTO_GPIO_CONTROL_TYPE_UNKNOWN;
+                t->index = 0;
+            }
+            break;
 
         default:
             break;
@@ -96,6 +106,9 @@ void proto_req_assign(ProtoReq *request, void *memory, uint16_t memorySize) {
                         break;
                 }
             }
+            break;
+
+        case PROTO_CMD_GPIO_CONTROL:
             break;
 
         default:
@@ -184,6 +197,46 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
                             break;
 
                         default:
+                            break;
+                    }
+                }
+                break;
+
+            case PROTO_CMD_GPIO_CONTROL:
+                {
+                    ProtoReqGpioControl *c = &request->request.gpioControl;
+
+                    PTR_U8(memory)[ret++] = ((c->type << 4) & 0xf0) | (c->index & 0x0f);
+
+                    switch (c->type) {
+                        case PROTO_GPIO_CONTROL_TYPE_GET_VALUE:
+                            break;
+
+                        case PROTO_GPIO_CONTROL_TYPE_SET_VALUE:
+                            {
+                                if (c->data.setValue.hi) {
+                                    PTR_U8(memory)[ret++] = PROTO_GPIO_CONTROL_FLAG_HI;
+
+                                } else {
+                                    PTR_U8(memory)[ret++] = 0;
+                                }
+                            }
+                            break;
+
+                        case PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION:
+                            {
+                                uint8_t val = 0;
+
+                                if (c->data.setDirection.hi) {
+                                    val |= PROTO_GPIO_CONTROL_FLAG_HI;
+                                }
+
+                                if (c->data.setDirection.out) {
+                                    val |= PROTO_GPIO_CONTROL_FLAG_OUT;
+                                }
+
+                                PTR_U8(memory)[ret++] = val;
+                            }
                             break;
                     }
                 }
@@ -343,6 +396,55 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
 
                                     memoryP++;
                                     memorySize--;
+                                }
+                                break;
+                        }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_GPIO_CONTROL:
+                {
+                    ProtoReqGpioControl *t = &request->request.gpioControl;
+
+                    if (ret) {
+                        ret = memorySize > 0;
+                        if (ret) {
+                            t->type  = (*memoryP) >> 4;
+                            t->index = (*memoryP) & 0x0f;
+
+                            memoryP++;
+                            memorySize--;
+                        }
+                    }
+
+                    if (ret) {
+                        switch (t->type) {
+                            case PROTO_GPIO_CONTROL_TYPE_GET_VALUE:
+                                break;
+
+                            case PROTO_GPIO_CONTROL_TYPE_SET_VALUE:
+                                {
+                                    ret = memorySize > 0;
+                                    if (ret) {
+                                        t->data.setValue.hi = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_HI) != 0;
+
+                                        memoryP++;
+                                        memorySize--;
+                                    }
+                                }
+                                break;
+
+                            case PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION:
+                                {
+                                    ret = memorySize > 0;
+                                    if (ret) {
+                                        t->data.setDirection.hi  = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_HI)  != 0;
+                                        t->data.setDirection.out = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_OUT) != 0;
+
+                                        memoryP++;
+                                        memorySize--;
+                                    }
                                 }
                                 break;
                         }

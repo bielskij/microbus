@@ -399,3 +399,112 @@ TEST(common_protocol, request_ow_transfer) {
         }
     }
 }
+
+TEST(common_protocol, request_gpio_control) {
+    uint8_t buffer[64];
+
+    uint16_t bufferWritten;
+
+    {
+        ProtoReq request;
+
+        proto_req_init(&request, buffer, sizeof(buffer), PROTO_CMD_GPIO_CONTROL);
+
+        ASSERT_EQ(request.cmd, PROTO_CMD_GPIO_CONTROL);
+
+        {
+            auto &t = request.request.gpioControl;
+
+            ASSERT_EQ(t.type, PROTO_GPIO_CONTROL_TYPE_UNKNOWN);
+        }
+    }
+
+    {
+        ProtoReq request;
+
+        proto_req_init(&request, buffer, sizeof(buffer), PROTO_CMD_GPIO_CONTROL);
+
+        {
+            auto &t = request.request.gpioControl;
+
+            {
+                t.type  = PROTO_GPIO_CONTROL_TYPE_GET_VALUE;
+                t.index = 5;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                bufferWritten = proto_req_encode(&request, buffer, sizeof(buffer));
+                ASSERT_EQ(bufferWritten, 1);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.gpioControl.type = request.request.gpioControl.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.gpioControl.type,  request.request.gpioControl.type);
+                    ASSERT_EQ(decoded.request.gpioControl.index, request.request.gpioControl.index);
+                }
+            }
+
+            {
+                t.type  = PROTO_GPIO_CONTROL_TYPE_SET_VALUE;
+                t.index = 5;
+
+                t.data.setValue.hi = true;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                bufferWritten = proto_req_encode(&request, buffer, sizeof(buffer));
+                ASSERT_EQ(bufferWritten, 2);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.gpioControl.type = request.request.gpioControl.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.gpioControl.type,  request.request.gpioControl.type);
+                    ASSERT_EQ(decoded.request.gpioControl.index, request.request.gpioControl.index);
+
+                    ASSERT_EQ(decoded.request.gpioControl.data.setValue.hi, request.request.gpioControl.data.setValue.hi);
+                }
+            }
+
+            {
+                t.type  = PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION;
+                t.index = 5;
+
+                t.data.setDirection.hi  = true;
+                t.data.setDirection.out = true;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                bufferWritten = proto_req_encode(&request, buffer, sizeof(buffer));
+                ASSERT_EQ(bufferWritten, 2);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.gpioControl.type = request.request.gpioControl.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.gpioControl.type,  request.request.gpioControl.type);
+                    ASSERT_EQ(decoded.request.gpioControl.index, request.request.gpioControl.index);
+
+                    ASSERT_EQ(decoded.request.gpioControl.data.setDirection.hi,  request.request.gpioControl.data.setDirection.hi);
+                    ASSERT_EQ(decoded.request.gpioControl.data.setDirection.out, request.request.gpioControl.data.setDirection.out);
+                }
+            }
+        }
+    }
+}

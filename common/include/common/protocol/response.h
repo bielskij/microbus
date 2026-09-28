@@ -60,6 +60,16 @@ typedef struct _ProtoResOwTransfer {
     } data;
 } ProtoResOwTransfer;
 
+typedef struct _ProtoResGpioControl {
+    uint8_t type;
+
+    union {
+        struct {
+            uint8_t hi;
+        } getValue;
+    } data;
+} ProtoResGpioControl;
+
 typedef struct _ProtoRes {
     uint8_t cmd;
 
@@ -67,6 +77,7 @@ typedef struct _ProtoRes {
         ProtoResGetInfo     getInfo;
         ProtoResI2cTransfer i2cTransfer;
         ProtoResOwTransfer  owTransfer;
+        ProtoResGpioControl gpioControl;
     } response;
 } ProtoRes;
 

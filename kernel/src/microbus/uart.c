@@ -897,6 +897,18 @@ static const struct file_operations _ubusW1Fops = {
     .llseek         = noop_llseek
 };
 
+#if 0
+[  954.178372] microbus_uart [_gpioDevSet:945]: CALL offset 0, value: 1
+[  954.193786] microbus_uart [_gpioIrqSetType:927]: CALL, type: 1
+[  954.193809] microbus_uart [_gpioIrqUnmask:923]: CALL
+[  954.139421] microbus_uart [_gpioDevDirectionOutput:907]: CALL offset 0, value: 0
+[  954.139441] microbus_uart [_gpioDevDirectionOutput:907]: CALL offset 1, value: 0
+[  954.139456] pn544_hci_i2c 1-0028: NFC: Detecting nfc_en polarity
+[  954.139463] microbus_uart [_gpioDevSet:945]: CALL offset 1, value: 0
+[  954.139468] microbus_uart [_gpioDevSet:945]: CALL offset 0, value: 1
+[  954.154654] microbus_uart [_gpioDevSet:945]: CALL offset 0, value: 0
+#endif
+
 static int _gpioDevDirectionInput(struct gpio_chip *gpio, unsigned int offset) {
     UBUS_DBG(("CALL offset %u", offset));
 
@@ -913,6 +925,10 @@ static int _gpioDevGet(struct gpio_chip *gpio, unsigned int offset) {
     UBUS_DBG(("CALL offset %u", offset));
 
     return 0; // 0 or 1
+}
+
+static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) {
+    UBUS_DBG(("CALL offset %u, value: %d", offset, value));
 }
 
 static void _gpioIrqMask(struct irq_data *data) {
@@ -940,10 +956,6 @@ static const struct irq_chip _gpioIrqChip = {
 
     GPIOCHIP_IRQ_RESOURCE_HELPERS,
 };
-
-static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) {
-    UBUS_DBG(("CALL offset %u, value: %d", offset, value));
-}
 
 static void _sendPacket(UbusUart *ubus, ProtoPkt *pkt) {
     // TODO: Handle errors!
@@ -1063,46 +1075,26 @@ static int _workerRoutine(void *arg) {
 
                         _prepareTmpPacket(ubus);
 
-                        info->features |= PROTO_FEATURE_GPIO; // REMOVE
                         if ((info->features & PROTO_FEATURE_GPIO) != 0) {
-                            size_t gpioCount = 4;
-
                             UBUS_DBG(("Registering new gpio device in kernel"));
 
-                            // ubus->gpioLookup = kzalloc(struct_size(ubus->gpioLookup, table, gpioCount + 1), GFP_KERNEL);
-                            // if (ubus->gpioLookup == NULL) {
-                            //     UBUS_ERR(("Cannot allocate memory for gpio mapping"));
+                            struct gpio_chip *gpio = &ubus->gpio;
 
-                            // } else {
-                                struct gpio_chip *gpio = &ubus->gpio;
+                            gpio->ngpio = info->gpio.count;
 
-                                gpio->ngpio = gpioCount;
+                            gpio_irq_chip_set_chip(&gpio->irq, &_gpioIrqChip);
 
-                                // {
-                                //     ubus->gpioLookup->dev_id = "1-0028";
+                            ret = gpiochip_add_data(gpio, ubus);
+                            if (! ret) {
+                                ubus->information.gpio.pinCount = gpio->ngpio;
 
-                                //     ubus->gpioLookup->table[0] =  GPIO_LOOKUP("microbus-gpio", 0, "enable",   GPIO_ACTIVE_HIGH);
-                                //     ubus->gpioLookup->table[1] =  GPIO_LOOKUP("microbus-gpio", 1, "firmware", GPIO_ACTIVE_HIGH);
+                                UBUS_LOG(("Created a new GPIO chip with %u pins", gpio->ngpio));
 
-                                //     gpiod_add_lookup_table(ubus->gpioLookup);
-                                // }
+                                ubus->information.features |= MICROBUS_FEATURE_FLAG_GPIO;
 
-                                gpio_irq_chip_set_chip(&gpio->irq, &_gpioIrqChip);
-
-                                ret = gpiochip_add_data(gpio, ubus);
-                                if (! ret) {
-                                    UBUS_LOG(("Created new gpio chip"));
-
-                                    ubus->information.features |= MICROBUS_FEATURE_FLAG_GPIO;
-
-                                } else {
-                                    UBUS_ERR(("Cannot register gpio chip (%d)", ret));
-
-                                    // kfree(ubus->gpioLookup);
-
-                                    // ubus->gpioLookup = NULL;
-                                }
-                            // }
+                            } else {
+                                UBUS_ERR(("Cannot register gpio chip (%d)", ret));
+                            }
                         }
 
                         if ((info->features & PROTO_FEATURE_I2C) != 0) {
@@ -1113,19 +1105,6 @@ static int _workerRoutine(void *arg) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
 
                                 ubus->information.features |= MICROBUS_FEATURE_FLAG_I2C;
-
-//                                 {
-//                                     struct gpio_desc *desc = gpio_device_get_desc(ubus->gpio.gpiodev, 2);
-//                                     if (desc) {
-//                                         _boardInfo.irq = gpiod_to_irq(desc);
-//                                     }
-//                                 }
-
-// UBUS_LOG(("IRQ: %u", _boardInfo.irq));
-
-//                                 // TODO: Fixme
-                                // i2c_new_client_device(&ubus->i2cAdapter, &_boardInfo);
-// i2c_unregister_device()
                             }
                         }
 
@@ -1636,7 +1615,7 @@ static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long a
                                         gpiod_remove_lookup_table(dev->gpioLookup);
 
                                         kfree(dev->gpioLookup);
-                                        
+
                                         dev->gpioLookup = NULL;
                                     }
 
