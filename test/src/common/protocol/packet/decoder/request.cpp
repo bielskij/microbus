@@ -466,6 +466,72 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
 
             ASSERT_EQ(t.data.touchBit.value, 1);
         }
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_GPIO_CONTROL,
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.index = 7;
+            t.type  = PROTO_GPIO_CONTROL_TYPE_GET_VALUE;
+        },
+        [](ProtoReq &req){
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            ASSERT_EQ(t.index, 7);
+            ASSERT_EQ(t.type,  PROTO_GPIO_CONTROL_TYPE_GET_VALUE);
+        },
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_GPIO_CONTROL,
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.index = 7;
+            t.type  = PROTO_GPIO_CONTROL_TYPE_SET_VALUE;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.data.setValue.hi = true;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            ASSERT_EQ(t.index, 7);
+            ASSERT_EQ(t.type,  PROTO_GPIO_CONTROL_TYPE_SET_VALUE);
+
+            ASSERT_EQ(t.data.setValue.hi, true);
+        },
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_GPIO_CONTROL,
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.index = 7;
+            t.type  = PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.data.setDirection.hi  = true;
+            t.data.setDirection.out = true;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            ASSERT_EQ(t.index, 7);
+            ASSERT_EQ(t.type,  PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION);
+
+            ASSERT_EQ(t.data.setDirection.hi,  true);
+            ASSERT_EQ(t.data.setDirection.out, true);
+        },
     }
 
     // RequestDecoderTestData {

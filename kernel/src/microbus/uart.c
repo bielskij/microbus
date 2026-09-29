@@ -909,26 +909,118 @@ static const struct file_operations _ubusW1Fops = {
 [  954.154654] microbus_uart [_gpioDevSet:945]: CALL offset 0, value: 0
 #endif
 
-static int _gpioDevDirectionInput(struct gpio_chip *gpio, unsigned int offset) {
-    UBUS_DBG(("CALL offset %u", offset));
+static int _gpioDevDirection(UbusUart *ubus, unsigned int offset, bool out, bool hi) {
+    int ret = 0;
 
-    return 0;
+    {
+        UBUS_DBG(("CALL offset %u, out: %d, hi: %d", offset, out, hi));
+
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+        if (cmd) {
+            ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+            c->type  = PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION;
+            c->index = offset;
+
+            c->data.setDirection.out = out;
+            c->data.setDirection.hi  = hi;
+
+            cmd_prepare(ubus, cmd);
+            cmd_enqueue(ubus, cmd);
+            cmd_wait(cmd);
+
+            {
+                int errorCode = cmd->errorCode;
+
+                if (errorCode != 0) {
+                    ret = -EINVAL;
+                }
+            }
+
+            cmd_free(&cmd);
+        }
+    }
+
+    return ret;
+}
+
+static int _gpioDevDirectionInput(struct gpio_chip *gpio, unsigned int offset) {
+    UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
+
+    return _gpioDevDirection(ubus, offset, false, false);
 }
 
 static int _gpioDevDirectionOutput(struct gpio_chip *gpio, unsigned int offset, int value) {
-    UBUS_DBG(("CALL offset %u, value: %d", offset, value));
+    UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
 
-    return 0;
+    return _gpioDevDirection(ubus, offset, true, value ? true : false);
 }
 
 static int _gpioDevGet(struct gpio_chip *gpio, unsigned int offset) {
-    UBUS_DBG(("CALL offset %u", offset));
+    int ret = 0;
 
-    return 0; // 0 or 1
+    {
+        UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
+
+        UBUS_DBG(("CALL offset %u", offset));
+
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+        if (cmd) {
+            ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+            c->type  = PROTO_GPIO_CONTROL_TYPE_GET_VALUE;
+            c->index = offset;
+
+            cmd_prepare(ubus, cmd);
+            cmd_enqueue(ubus, cmd);
+            cmd_wait(cmd);
+
+            {
+                int errorCode = cmd->errorCode;
+
+                if (errorCode != 0) {
+                    ret = 0;
+
+                } else {
+                    ret = cmd->response.response.gpioControl.data.getValue.hi ? 1 : 0;
+                }
+            }
+
+            cmd_free(&cmd);
+        }
+    }
+
+    return ret;
 }
 
 static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) {
+    UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
+    
     UBUS_DBG(("CALL offset %u, value: %d", offset, value));
+
+    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+    if (cmd) {
+        ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+        c->type  = PROTO_GPIO_CONTROL_TYPE_SET_VALUE;
+        c->index = offset;
+
+        c->data.setValue.hi = value ? 1 : 0;
+
+        cmd_prepare(ubus, cmd);
+        cmd_enqueue(ubus, cmd);
+        cmd_wait(cmd);
+
+        {
+            int errorCode = cmd->errorCode;
+
+            if (errorCode != 0) {
+                UBUS_ERR(("Unable to set value %d on gpio-%u, error code = %d", value, offset, errorCode));
+            }
+        }
+
+        cmd_free(&cmd);
+    }
 }
 
 static void _gpioIrqMask(struct irq_data *data) {
@@ -1014,10 +1106,6 @@ static void _handleCmd(UbusUart *ubus, UbusCmd *cmd, bool force) {
 
     complete(&cmd->cmdCompletion);
 }
-
-static struct i2c_board_info _boardInfo = {
-    I2C_BOARD_INFO("pn544", 0x28)
-};
 
 static int _workerRoutine(void *arg) {
     UbusUart *ubus = (UbusUart *) arg;

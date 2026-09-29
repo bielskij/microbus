@@ -104,6 +104,14 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
                     }
                     break;
 
+                case PROTO_CMD_GPIO_CONTROL:
+                    {
+                        ProtoResGpioControl *c = &response.response.gpioControl;
+
+                        c->type = request.request.gpioControl.type;
+                    }
+                    break;
+
                 default:
                     _sendError(hub, PROTO_ERROR_INVALID_CMD);
                     break;

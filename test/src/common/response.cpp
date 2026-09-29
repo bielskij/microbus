@@ -360,3 +360,43 @@ TEST(common_protocol, response_ow_transfer) {
         }
     }
 }
+
+TEST(common_protocol, response_gpio_control) {
+    uint8_t buffer[64];
+
+    uint16_t bufferWritten;
+
+    {
+        ProtoRes response;
+
+        {
+            proto_res_init(&response, buffer, sizeof(buffer), PROTO_CMD_GPIO_CONTROL);
+
+            ASSERT_EQ(response.cmd,                       PROTO_CMD_GPIO_CONTROL);
+            ASSERT_EQ(response.response.gpioControl.type, PROTO_OW_TRANSFER_TYPE_UNKNOWN);
+
+            response.response.gpioControl.type = PROTO_GPIO_CONTROL_TYPE_GET_VALUE;
+            response.response.gpioControl.data.getValue.hi = true;
+
+            proto_res_assign(&response, buffer, sizeof(buffer));
+
+            bufferWritten = proto_res_encode(&response, buffer, sizeof(buffer));
+            ASSERT_EQ(bufferWritten, 1);
+
+            {
+                ProtoRes decoded;
+
+                proto_res_init(&decoded, nullptr, 0, response.cmd);
+
+                decoded.response.gpioControl.type = response.response.gpioControl.type;
+
+                proto_res_assign(&decoded, buffer, bufferWritten);
+
+                ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
+
+                ASSERT_EQ(decoded.response.gpioControl.type,             response.response.gpioControl.type);
+                ASSERT_EQ(decoded.response.gpioControl.data.getValue.hi, response.response.gpioControl.data.getValue.hi);
+            }
+        }
+    }
+}

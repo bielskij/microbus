@@ -53,6 +53,14 @@ void proto_res_init(ProtoRes *response, void *memory, uint16_t memorySize, uint8
             }
             break;
 
+        case PROTO_CMD_GPIO_CONTROL:
+            {
+                ProtoResGpioControl *c = &response->response.gpioControl;
+
+                c->type = PROTO_GPIO_CONTROL_TYPE_UNKNOWN;
+            }
+            break;
+
         default:
             break;
     }
@@ -92,6 +100,9 @@ void proto_res_assign(ProtoRes *response, void *memory, uint16_t memorySize) {
                     t->data.transfer.dataSize = 0;
                 }
             }
+            break;
+
+        case PROTO_CMD_GPIO_CONTROL:
             break;
 
         default:
@@ -174,6 +185,27 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                         default:
                             break;
                     }
+                }
+                break;
+
+            case PROTO_CMD_GPIO_CONTROL:
+                {
+                    ProtoResGpioControl *c = &response->response.gpioControl;
+
+                    PTR_U8(memory)[ret] = ((c->type << 4) & 0xf0);
+
+                    switch (c->type) {
+                        case PROTO_GPIO_CONTROL_TYPE_GET_VALUE:
+                            if (c->data.getValue.hi) {
+                                PTR_U8(memory)[ret] |= PROTO_GPIO_CONTROL_FLAG_HI;
+                            }
+                            break;
+
+                        default:
+                            break;
+                    }
+
+                    ret++;
                 }
                 break;
 
@@ -325,6 +357,24 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                                 }
                             }
                         }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_GPIO_CONTROL:
+                {
+                    ProtoResGpioControl *c = &response->response.gpioControl;
+
+                    ret = memorySize > 0;
+                    if (ret) {
+                        c->type = *memoryP >> 4;;
+
+                        if (c->type == PROTO_GPIO_CONTROL_TYPE_GET_VALUE) {
+                            c->data.getValue.hi = (*memoryP & PROTO_GPIO_CONTROL_FLAG_HI) != 0;
+                        }
+
+                        memoryP++;
+                        memorySize--;
                     }
                 }
                 break;

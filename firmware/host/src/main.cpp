@@ -235,6 +235,37 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
             }
             break;
 
+        case PROTO_CMD_GPIO_CONTROL:
+            {
+                auto &req = request->request.gpioControl;
+                auto &res = response->response.gpioControl;
+
+                switch (req.type) {
+                    case PROTO_GPIO_CONTROL_TYPE_GET_VALUE:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_GET_VALUE, pin {}]", req.index));
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION, pin {}, out: {}, hi: {}]", 
+                                req.index, req.data.setDirection.out, req.data.setDirection.hi
+                            ));
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_SET_VALUE:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_VALUE, pin {}, hi: {}]", 
+                                req.index, req.data.setValue.hi
+                            ));
+                        }
+                        break;
+                }
+            }
+            break;
+
         default:
             {
                 DBG(("Unknown command %d", request->cmd));
