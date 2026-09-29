@@ -218,25 +218,26 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
 }
 
 bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
-    bool ret = memory != NULL && memorySize;
-printf("%p, %u\n", memory, memorySize);
-    if (ret) {
+    bool ret = true;
+
+    {
         uint8_t *memoryP = PTR_U8(memory);
 
         switch (response->cmd) {
+            case PROTO_CMD_RESET:
+                break;
+
             case PROTO_CMD_GET_INFO:
                 {
                     ProtoResGetInfo *info = &response->response.getInfo;
 
+                    ret = memory != NULL && memorySize;
                     if (ret) {
-                        ret = memorySize != 0;
-                        if (ret) {
-                            info->version.major = (*memoryP) >> 4;
-                            info->version.minor = (*memoryP) & 0x0f;
+                        info->version.major = (*memoryP) >> 4;
+                        info->version.minor = (*memoryP) & 0x0f;
 
-                            memoryP++;
-                            memorySize--;
-                        }
+                        memoryP++;
+                        memorySize--;
                     }
 
                     if (ret) {
@@ -285,7 +286,7 @@ printf("%p, %u\n", memory, memorySize);
                     t->rxBuffer     = NULL;
                     t->rxBufferSize = 0;
 
-                    ret = memorySize != 0;
+                    ret = memory != NULL && memorySize;
                     if (ret) {
                         t->status = *memoryP;
 
@@ -306,7 +307,7 @@ printf("%p, %u\n", memory, memorySize);
                 {
                     ProtoResOwTransfer *t = &response->response.owTransfer;
 
-                    ret = memorySize != 0;
+                    ret = memory != NULL && memorySize;
                     if (ret) {
                         t->status = *memoryP >> 4;
                         t->type   = *memoryP & 0x0f;
@@ -365,7 +366,7 @@ printf("%p, %u\n", memory, memorySize);
                 {
                     ProtoResGpioControl *c = &response->response.gpioControl;
 
-                    ret = memorySize > 0;
+                    ret = memory != NULL && memorySize;
                     if (ret) {
                         c->type = *memoryP >> 4;;
 

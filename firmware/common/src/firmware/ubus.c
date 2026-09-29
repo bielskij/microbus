@@ -77,6 +77,9 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
                     }
                     break;
 
+                case PROTO_CMD_RESET:
+                    break;
+
                 case PROTO_CMD_I2C_TRANSFER:
                     {
                         ProtoResI2cTransfer *res = &response.response.i2cTransfer;

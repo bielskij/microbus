@@ -995,7 +995,7 @@ static int _gpioDevGet(struct gpio_chip *gpio, unsigned int offset) {
 
 static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) {
     UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
-    
+
     UBUS_DBG(("CALL offset %u, value: %d", offset, value));
 
     UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
@@ -1044,7 +1044,7 @@ static int _gpioIrqSetType(struct irq_data *data, unsigned int type) {
         UbusUart *ubus = (UbusUart *) irq_data_get_irq_chip_data(data);
 
         UBUS_DBG(("CALL, type: %d", type));
-        
+
         switch (type) {
             case IRQ_TYPE_EDGE_FALLING:
                 UBUS_DBG(("IRQ_TYPE_EDGE_FALLING(%lu)", data->hwirq));
@@ -1062,7 +1062,7 @@ static int _gpioIrqSetType(struct irq_data *data, unsigned int type) {
                 ret = -EINVAL;
         }
     }
-    
+
     return ret;
 }
 
@@ -1280,6 +1280,22 @@ static int _workerRoutine(void *arg) {
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        if (ret == 0) {
+                            cmd_init(ubus, cmd, PROTO_CMD_RESET);
+
+                            ret = cmd_prepare(ubus, cmd);
+                            if (ret == 0) {
+                                _handleCmd(ubus, cmd, true);
+
+                                if (cmd->errorCode == 0) {
+                                    UBUS_LOG(("Hardware has been successfully reset"));
+
+                                } else {
+                                    // TODO: cleanup
                                 }
                             }
                         }

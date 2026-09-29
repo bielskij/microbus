@@ -74,6 +74,12 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
     auto *ctx = reinterpret_cast<Context *>(callbackData);
 
     switch (request->cmd) {
+        case PROTO_CMD_RESET:
+            {
+                DBG(("PROTO_CMD_RESET"));
+            }
+            break;
+
         case PROTO_CMD_GET_INFO:
             {
                 DBG(("PROTO_CMD_GET_INFO"));
@@ -249,7 +255,7 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
 
                     case PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION:
                         {
-                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION, pin {}, out: {}, hi: {}]", 
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION, pin {}, out: {}, hi: {}]",
                                 req.index, req.data.setDirection.out, req.data.setDirection.hi
                             ));
                         }
@@ -257,7 +263,7 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
 
                     case PROTO_GPIO_CONTROL_TYPE_SET_VALUE:
                         {
-                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_VALUE, pin {}, hi: {}]", 
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_VALUE, pin {}, hi: {}]",
                                 req.index, req.data.setValue.hi
                             ));
                         }

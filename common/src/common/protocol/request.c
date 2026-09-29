@@ -260,6 +260,9 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
             case PROTO_CMD_GET_INFO:
                 break;
 
+            case PROTO_CMD_RESET:
+                break;
+
             case PROTO_CMD_I2C_TRANSFER:
                 {
                     ProtoReqI2CTransfer *t = &request->request.i2cTransfer;
