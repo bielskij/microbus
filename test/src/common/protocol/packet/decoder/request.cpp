@@ -124,6 +124,16 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
         },
     },
 
+    RequestDecoderTestData {
+        PROTO_CMD_RESET,
+        [](ProtoReq &req){
+        },
+        [](ProtoReq &req){
+        },
+        [](ProtoReq &req){
+        },
+    },
+
     // Start, read 64
     RequestDecoderTestData {
         PROTO_CMD_I2C_TRANSFER,

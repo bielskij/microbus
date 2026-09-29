@@ -28,6 +28,12 @@
 #define PROTO_FEATURE_GPIO (1 << 2)
 
 /*
+ * 2) CMD_RESET
+ *
+ */
+#define PROTO_CMD_RESET 0x1
+
+/*
  * 2) CMD_I2C_TRANSFER
  *
  * Request
@@ -41,7 +47,7 @@
  * [  1B  ][... ]
  * [STATUS][DATA]
  */
-#define PROTO_CMD_I2C_TRANSFER 0x1
+#define PROTO_CMD_I2C_TRANSFER 0x2
 
 #define PROTO_I2C_TRANSFER_FLAG_START          (1 << 0)
 #define PROTO_I2C_TRANSFER_FLAG_REPEATED_START (1 << 1)
@@ -79,7 +85,7 @@
  * [  1B  ][... ]
  * [STATUS][DATA]
  */
-#define PROTO_CMD_OW_TRANSFER  0x2
+#define PROTO_CMD_OW_TRANSFER  0x3
 
 #define PROTO_OW_ROM_ID_SIZE 8
 
@@ -121,7 +127,7 @@
  * * GET_VALUE
  */
 
-#define PROTO_CMD_GPIO_CONTROL 0x3
+#define PROTO_CMD_GPIO_CONTROL 0x4
 
 #define PROTO_GPIO_CONTROL_FLAG_HI  (1 << 0)
 #define PROTO_GPIO_CONTROL_FLAG_OUT (1 << 1)

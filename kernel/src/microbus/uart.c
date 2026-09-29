@@ -1024,17 +1024,46 @@ static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) 
 }
 
 static void _gpioIrqMask(struct irq_data *data) {
-    UBUS_DBG(("CALL "));
+    UbusUart *ubus = (UbusUart *) irq_data_get_irq_chip_data(data);
+
+    // TODO: Disable irq
+    UBUS_DBG(("CALL %lu", data->hwirq));
 }
 
 static void _gpioIrqUnmask(struct irq_data *data) {
-    UBUS_DBG(("CALL "));
+    UbusUart *ubus = (UbusUart *) irq_data_get_irq_chip_data(data);
+
+    // TODO: Enable irq
+    UBUS_DBG(("CALL %lu", data->hwirq));
 }
 
 static int _gpioIrqSetType(struct irq_data *data, unsigned int type) {
-    UBUS_DBG(("CALL, type: %d", type));
+    int ret = 0;
 
-    return 0;
+    {
+        UbusUart *ubus = (UbusUart *) irq_data_get_irq_chip_data(data);
+
+        UBUS_DBG(("CALL, type: %d", type));
+        
+        switch (type) {
+            case IRQ_TYPE_EDGE_FALLING:
+                UBUS_DBG(("IRQ_TYPE_EDGE_FALLING(%lu)", data->hwirq));
+                break;
+
+            case IRQ_TYPE_EDGE_RISING:
+                UBUS_DBG(("IRQ_TYPE_EDGE_RISING(%lu)", data->hwirq));
+                break;
+
+            case IRQ_TYPE_EDGE_BOTH:
+                UBUS_DBG(("IRQ_TYPE_EDGE_BOTH(%lu)", data->hwirq));
+                break;
+
+            default:
+                ret = -EINVAL;
+        }
+    }
+    
+    return ret;
 }
 
 static const struct irq_chip _gpioIrqChip = {
@@ -1392,6 +1421,31 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
     return ret;
 }
 
+static void _removeI2cDevice(UbusUart *ubus, I2cDevice *dev) {
+    if (dev->client) {
+        UBUS_LOG(("Removing i2c device for address: %#02x", dev->client->addr));
+
+        i2c_unregister_device(dev->client);
+
+        dev->client = NULL;
+    }
+
+    if (dev->gpioLookup) {
+        gpiod_remove_lookup_table(dev->gpioLookup);
+
+        kfree(dev->gpioLookup);
+
+        dev->gpioLookup = NULL;
+    }
+
+
+    // TODO: Unregister
+
+    list_del(&dev->listItem);
+
+    kfree(dev);
+}
+
 static void _ldiscCleanup(UbusUart **ubus) {
     UbusUart *b = ubus != NULL ? *ubus : NULL;
 
@@ -1400,12 +1454,25 @@ static void _ldiscCleanup(UbusUart **ubus) {
         return;
     }
 
+    {
+        mutex_lock(&b->i2cDevicesLock);
+        {
+            I2cDevice *dev;
+            I2cDevice *tmp;
+
+            list_for_each_entry_safe(dev, tmp, &b->i2cDevices, listItem) {
+                _removeI2cDevice(b, dev);
+            }
+        }
+        mutex_unlock(&b->i2cDevicesLock);
+
+        mutex_destroy(&b->i2cDevicesLock);
+    }
+
     if (b->information.features & MICROBUS_FEATURE_FLAG_I2C) {
         // TODO: Remove all attached devices
         i2c_del_adapter(&b->i2cAdapter);
     }
-
-    mutex_destroy(&b->i2cDevicesLock);
 
     if (b->w1Master.data != NULL) {
         w1_remove_master_device(&b->w1Master);
@@ -1415,9 +1482,6 @@ static void _ldiscCleanup(UbusUart **ubus) {
         cdev_del(&b->w1MasterCharCdev);
         unregister_chrdev_region(b->w1MasterCharDev, 1);
     }
-
-    // if (b->gpioLookup) {
-        // gpiod_remove_lookup_table(b->gpioLookup);
 
     if (b->information.features & MICROBUS_FEATURE_FLAG_GPIO) {
         gpiochip_remove(&b->gpio);
@@ -1690,29 +1754,7 @@ static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long a
 
                             list_for_each_entry_safe(dev, tmp, &ubus->i2cDevices, listItem) {
                                 if (dev->info.addr == params.address) {
-
-                                    UBUS_LOG(("Removing i2c device for address: %#02x", params.address));
-
-                                    if (dev->client) {
-                                        i2c_unregister_device(dev->client);
-
-                                        dev->client = NULL;
-                                    }
-
-                                    if (dev->gpioLookup) {
-                                        gpiod_remove_lookup_table(dev->gpioLookup);
-
-                                        kfree(dev->gpioLookup);
-
-                                        dev->gpioLookup = NULL;
-                                    }
-
-
-                                    // TODO: Unregister
-
-                                    list_del(&dev->listItem);
-
-                                    kfree(dev);
+                                    _removeI2cDevice(ubus, dev);
                                 }
                             }
                         }

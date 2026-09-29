@@ -219,7 +219,7 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
 
 bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
     bool ret = memory != NULL && memorySize;
-
+printf("%p, %u\n", memory, memorySize);
     if (ret) {
         uint8_t *memoryP = PTR_U8(memory);
 

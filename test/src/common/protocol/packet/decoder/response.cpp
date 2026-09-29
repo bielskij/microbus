@@ -137,6 +137,16 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
         }
     },
 
+    ResponseDecoderTestData {
+        PROTO_CMD_RESET,
+        [](ProtoRes &res) {
+        },
+        [](ProtoRes &res) {
+        },
+        [](ProtoRes &res) {
+        }
+    },
+
     // Read 64 (NAK)
     ResponseDecoderTestData {
         PROTO_CMD_I2C_TRANSFER,
