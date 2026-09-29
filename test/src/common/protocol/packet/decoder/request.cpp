@@ -542,6 +542,75 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, RequestDecoderTestWithParameter, testi
             ASSERT_EQ(t.data.setDirection.hi,  true);
             ASSERT_EQ(t.data.setDirection.out, true);
         },
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_GPIO_CONTROL,
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.index = 7;
+            t.type  = PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.data.setIrqType.rising  = true;
+            t.data.setIrqType.falling = true;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            ASSERT_EQ(t.index, 7);
+            ASSERT_EQ(t.type,  PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE);
+
+            ASSERT_EQ(t.data.setIrqType.rising,  true);
+            ASSERT_EQ(t.data.setIrqType.falling, true);
+        },
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_GPIO_CONTROL,
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.index = 7;
+            t.type  = PROTO_GPIO_CONTROL_TYPE_IRQ_MASK;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.data.setIrqType.rising  = true;
+            t.data.setIrqType.falling = true;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            ASSERT_EQ(t.index, 7);
+            ASSERT_EQ(t.type,  PROTO_GPIO_CONTROL_TYPE_IRQ_MASK);
+        },
+    },
+
+    RequestDecoderTestData {
+        PROTO_CMD_GPIO_CONTROL,
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.index = 7;
+            t.type  = PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            t.data.setIrqType.rising  = true;
+            t.data.setIrqType.falling = true;
+        },
+        [](ProtoReq &req){
+            auto &t = req.request.gpioControl;
+
+            ASSERT_EQ(t.index, 7);
+            ASSERT_EQ(t.type,  PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK);
+        },
     }
 
     // RequestDecoderTestData {

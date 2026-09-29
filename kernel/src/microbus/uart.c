@@ -897,18 +897,6 @@ static const struct file_operations _ubusW1Fops = {
     .llseek         = noop_llseek
 };
 
-#if 0
-[  954.178372] microbus_uart [_gpioDevSet:945]: CALL offset 0, value: 1
-[  954.193786] microbus_uart [_gpioIrqSetType:927]: CALL, type: 1
-[  954.193809] microbus_uart [_gpioIrqUnmask:923]: CALL
-[  954.139421] microbus_uart [_gpioDevDirectionOutput:907]: CALL offset 0, value: 0
-[  954.139441] microbus_uart [_gpioDevDirectionOutput:907]: CALL offset 1, value: 0
-[  954.139456] pn544_hci_i2c 1-0028: NFC: Detecting nfc_en polarity
-[  954.139463] microbus_uart [_gpioDevSet:945]: CALL offset 1, value: 0
-[  954.139468] microbus_uart [_gpioDevSet:945]: CALL offset 0, value: 1
-[  954.154654] microbus_uart [_gpioDevSet:945]: CALL offset 0, value: 0
-#endif
-
 static int _gpioDevDirection(UbusUart *ubus, unsigned int offset, bool out, bool hi) {
     int ret = 0;
 
@@ -1024,42 +1012,127 @@ static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) 
 }
 
 static void _gpioIrqMask(struct irq_data *data) {
-    UbusUart *ubus = (UbusUart *) irq_data_get_irq_chip_data(data);
+        UbusUart *ubus = (UbusUart *) gpiochip_get_data(
+            irq_data_get_irq_chip_data(data)
+        );
 
-    // TODO: Disable irq
     UBUS_DBG(("CALL %lu", data->hwirq));
+
+    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+    if (cmd) {
+        ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+        c->type  = PROTO_GPIO_CONTROL_TYPE_IRQ_MASK;
+        c->index = data->hwirq;
+
+        cmd_prepare(ubus, cmd);
+        cmd_enqueue(ubus, cmd);
+        cmd_wait(cmd);
+
+        {
+            int errorCode = cmd->errorCode;
+
+            if (errorCode != 0) {
+                UBUS_ERR(("Unable to mask gpio-%lu, error code = %d", data->hwirq, errorCode));
+            }
+        }
+
+        cmd_free(&cmd);
+    }
 }
 
 static void _gpioIrqUnmask(struct irq_data *data) {
-    UbusUart *ubus = (UbusUart *) irq_data_get_irq_chip_data(data);
+    UbusUart *ubus = (UbusUart *) gpiochip_get_data(
+        irq_data_get_irq_chip_data(data)
+    );
 
-    // TODO: Enable irq
     UBUS_DBG(("CALL %lu", data->hwirq));
+
+    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+    if (cmd) {
+        ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+        c->type  = PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK;
+        c->index = data->hwirq;
+
+        cmd_prepare(ubus, cmd);
+        cmd_enqueue(ubus, cmd);
+        cmd_wait(cmd);
+
+        {
+            int errorCode = cmd->errorCode;
+
+            if (errorCode != 0) {
+                UBUS_ERR(("Unable to unmask gpio-%lu, error code = %d", data->hwirq, errorCode));
+            }
+        }
+
+        cmd_free(&cmd);
+    }
 }
 
 static int _gpioIrqSetType(struct irq_data *data, unsigned int type) {
     int ret = 0;
 
     {
-        UbusUart *ubus = (UbusUart *) irq_data_get_irq_chip_data(data);
+        UbusUart *ubus = (UbusUart *) gpiochip_get_data(
+            irq_data_get_irq_chip_data(data)
+        );
 
-        UBUS_DBG(("CALL, type: %d", type));
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+        if (cmd == NULL) {
+            ret = -ENOMEM;
 
-        switch (type) {
-            case IRQ_TYPE_EDGE_FALLING:
-                UBUS_DBG(("IRQ_TYPE_EDGE_FALLING(%lu)", data->hwirq));
-                break;
+        } else {
+            ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
 
-            case IRQ_TYPE_EDGE_RISING:
-                UBUS_DBG(("IRQ_TYPE_EDGE_RISING(%lu)", data->hwirq));
-                break;
+            c->type  = PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE;
+            c->index = data->hwirq;
 
-            case IRQ_TYPE_EDGE_BOTH:
-                UBUS_DBG(("IRQ_TYPE_EDGE_BOTH(%lu)", data->hwirq));
-                break;
+            switch (type) {
+                case IRQ_TYPE_EDGE_FALLING:
+                    {
+                        UBUS_DBG(("IRQ_TYPE_EDGE_FALLING(%lu)", data->hwirq));
 
-            default:
-                ret = -EINVAL;
+                        c->data.setIrqType.falling = true;
+                    }
+                    break;
+
+                case IRQ_TYPE_EDGE_RISING:
+                    {
+                        UBUS_DBG(("IRQ_TYPE_EDGE_RISING(%lu)", data->hwirq));
+
+                        c->data.setIrqType.rising = true;
+                    }
+                    break;
+
+                case IRQ_TYPE_EDGE_BOTH:
+                    {
+                        UBUS_DBG(("IRQ_TYPE_EDGE_BOTH(%lu)", data->hwirq));
+
+                        c->data.setIrqType.rising  = true;
+                        c->data.setIrqType.falling = true;
+                    }
+                    break;
+
+                default:
+                    ret = -EINVAL;
+            }
+
+            if (ret == 0) {
+                cmd_prepare(ubus, cmd);
+                cmd_enqueue(ubus, cmd);
+                cmd_wait(cmd);
+
+                int errorCode = cmd->errorCode;
+                if (errorCode != 0) {
+                    UBUS_ERR(("Unable to unmask gpio-%lu, error code = %d", data->hwirq, errorCode));
+
+                    ret = -EINVAL;
+                }
+
+                cmd_free(&cmd);
+            }
         }
     }
 

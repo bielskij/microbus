@@ -57,6 +57,11 @@ typedef struct _ProtoReqGpioControl {
         struct {
             uint8_t hi;
         } setValue;
+
+        struct {
+            uint8_t rising;
+            uint8_t falling;
+        } setIrqType;
     } data;
 } ProtoReqGpioControl;
 

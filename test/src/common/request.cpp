@@ -505,6 +505,35 @@ TEST(common_protocol, request_gpio_control) {
                     ASSERT_EQ(decoded.request.gpioControl.data.setDirection.out, request.request.gpioControl.data.setDirection.out);
                 }
             }
+
+            {
+                t.type  = PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE;
+                t.index = 5;
+
+                t.data.setIrqType.rising  = true;
+                t.data.setIrqType.falling = true;
+
+                proto_req_assign(&request, buffer, sizeof(buffer));
+
+                bufferWritten = proto_req_encode(&request, buffer, sizeof(buffer));
+                ASSERT_EQ(bufferWritten, 2);
+
+                {
+                    ProtoReq decoded;
+
+                    decoded.request.gpioControl.type = request.request.gpioControl.type;
+
+                    proto_req_init(&decoded, nullptr, 0, request.cmd);
+
+                    ASSERT_TRUE(proto_req_decode(&decoded, buffer, bufferWritten));
+
+                    ASSERT_EQ(decoded.request.gpioControl.type,  request.request.gpioControl.type);
+                    ASSERT_EQ(decoded.request.gpioControl.index, request.request.gpioControl.index);
+
+                    ASSERT_EQ(decoded.request.gpioControl.data.setIrqType.rising,  request.request.gpioControl.data.setIrqType.rising);
+                    ASSERT_EQ(decoded.request.gpioControl.data.setIrqType.falling, request.request.gpioControl.data.setIrqType.falling);
+                }
+            }
         }
     }
 }

@@ -268,6 +268,30 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
                             ));
                         }
                         break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_IRQ_MASK:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_IRQ_MASK, pin {}]",
+                                req.index
+                            ));
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK, pin {}]",
+                                req.index
+                            ));
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE, pin {}, falling: {}, rising: {}]",
+                                req.index, req.data.setIrqType.falling, req.data.setIrqType.rising
+                            ));
+                        }
+                        break;
                 }
             }
             break;

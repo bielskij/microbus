@@ -108,9 +108,6 @@ void proto_req_assign(ProtoReq *request, void *memory, uint16_t memorySize) {
             }
             break;
 
-        case PROTO_CMD_GPIO_CONTROL:
-            break;
-
         default:
             break;
     }
@@ -121,11 +118,6 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
 
     if (memory) {
         switch (request->cmd) {
-            case PROTO_CMD_GET_INFO:
-                {
-                }
-                break;
-
             case PROTO_CMD_I2C_TRANSFER:
                 {
                     ProtoReqI2CTransfer *t = &request->request.i2cTransfer;
@@ -233,6 +225,22 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
 
                                 if (c->data.setDirection.out) {
                                     val |= PROTO_GPIO_CONTROL_FLAG_OUT;
+                                }
+
+                                PTR_U8(memory)[ret++] = val;
+                            }
+                            break;
+
+                        case PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE:
+                            {
+                                uint8_t val = 0;
+
+                                if (c->data.setIrqType.rising) {
+                                    val |= PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_RISING;
+                                }
+
+                                if (c->data.setIrqType.falling) {
+                                    val |= PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_FALLING;
                                 }
 
                                 PTR_U8(memory)[ret++] = val;
@@ -423,9 +431,6 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
 
                     if (ret) {
                         switch (t->type) {
-                            case PROTO_GPIO_CONTROL_TYPE_GET_VALUE:
-                                break;
-
                             case PROTO_GPIO_CONTROL_TYPE_SET_VALUE:
                                 {
                                     ret = memorySize > 0;
@@ -444,6 +449,19 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                                     if (ret) {
                                         t->data.setDirection.hi  = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_HI)  != 0;
                                         t->data.setDirection.out = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_OUT) != 0;
+
+                                        memoryP++;
+                                        memorySize--;
+                                    }
+                                }
+                                break;
+
+                            case PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE:
+                                {
+                                    ret = memorySize > 0;
+                                    if (ret) {
+                                        t->data.setIrqType.rising  = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_RISING)  != 0;
+                                        t->data.setIrqType.falling = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_FALLING) != 0;
 
                                         memoryP++;
                                         memorySize--;
