@@ -96,7 +96,8 @@ typedef struct _UbusCmd {
     ProtoPkt responsePacket;
     ProtoRes response;
 
-    int errorCode;
+    int  errorCode;
+    bool autoDestroy;
 } UbusCmd;
 
 typedef struct _GpioMapping {
@@ -150,13 +151,14 @@ typedef struct _UbusUart {
     struct gpio_chip gpio;
 } UbusUart;
 
-static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
+static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode, bool autoDestroy) {
     INIT_LIST_HEAD(&cmd->list);
 
     init_completion(&cmd->workerCompletion);
     init_completion(&cmd->cmdCompletion);
 
-    cmd->id = (u8) atomic_inc_return(&ubus->nextCmdId);
+    cmd->autoDestroy = autoDestroy;
+    cmd->id          = (u8) atomic_inc_return(&ubus->nextCmdId);
 
     // Initialize request
     {
@@ -169,7 +171,7 @@ static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
     return cmd;
 }
 
-static UbusCmd *cmd_alloc(UbusUart *ubus, uint8_t cmd) {
+static UbusCmd *cmd_alloc(UbusUart *ubus, uint8_t cmd, bool autoDestroy) {
     UbusCmd *ret = kzalloc(sizeof(*ret), GFP_KERNEL);
 
     if (ret) {
@@ -181,7 +183,7 @@ static UbusCmd *cmd_alloc(UbusUart *ubus, uint8_t cmd) {
         ret->responseBufferSize = ubus->packetSize;
         ret->responseBuffer     = kmalloc(ret->responseBufferSize, GFP_KERNEL);
 
-        ret = cmd_init(ubus, ret, cmd);
+        ret = cmd_init(ubus, ret, cmd, autoDestroy);
     }
 
     return ret;
@@ -199,19 +201,19 @@ static int cmd_prepare(UbusUart *ubus, UbusCmd *cmd) {
 
         } else {
             proto_req_assign(&cmd->request, cmd->requestPacket.payload, cmd->requestPacket.payloadSize);
+
+            cmd->requestPacket.payloadUsed = proto_req_encode(&cmd->request, cmd->requestPacket.payload, cmd->requestPacket.payloadSize);
         }
     }
 
     return ret;
 }
 
-static int cmd_enqueue(UbusUart *ubus, UbusCmd *cmd) {
+static int cmd_enqueue(UbusUart *ubus, UbusCmd *cmd, bool wait) {
     int ret = 0;
 
     {
         unsigned long flags;
-
-        cmd->requestPacket.payloadUsed = proto_req_encode(&cmd->request, cmd->requestPacket.payload, cmd->requestPacket.payloadSize);
 
         spin_lock_irqsave(&ubus->workerQueueLock, flags);
         {
@@ -220,6 +222,10 @@ static int cmd_enqueue(UbusUart *ubus, UbusCmd *cmd) {
         spin_unlock_irqrestore(&ubus->workerQueueLock, flags);
 
         wake_up(&ubus->wq);
+
+        if (wait) {
+            wait_for_completion(&cmd->cmdCompletion);
+        }
     }
 
     return ret;
@@ -263,19 +269,13 @@ static void _prepareTmpPacket(UbusUart *ubus) {
     }
 }
 
-static int cmd_wait(UbusCmd *cmd) {
-    wait_for_completion(&cmd->cmdCompletion);
-
-    return 0;
-}
-
 static void _w1SearchImpl(void *devData, struct w1_master *master, u8 searchType, w1_slave_found_callback callback) {
     UbusUart *ubus = (UbusUart *) devData;
 
     UBUS_TRACE(("[W1]: Search type: %02x", searchType));
 
     {
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
 
         ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
         ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
@@ -288,8 +288,7 @@ static void _w1SearchImpl(void *devData, struct w1_master *master, u8 searchType
         bool wasLast = false;
         do {
             cmd_prepare(ubus, cmd);
-            cmd_enqueue(ubus, cmd);
-            cmd_wait(cmd);
+            cmd_enqueue(ubus, cmd, true);
 
             UBUS_DBG(("[W1] Search step, status: %02x, rn: 0x%llx, descBit: %u, lastZero: %u, slaveCount: %d",
                 res->status, res->data.search.romId, res->data.search.descBit, res->data.search.lastZero, slaveCount
@@ -311,7 +310,7 @@ static void _w1SearchImpl(void *devData, struct w1_master *master, u8 searchType
             }
 
             if (! wasLast) {
-                cmd = cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+                cmd = cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER, false);
 
                 req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
 
@@ -355,15 +354,14 @@ static u8 _w1ResetBus(void *devData) {
         UBUS_TRACE(("[W1]: reseting bus"));
 
         {
-            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
             if (cmd) {
                 ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
 
                 t->type = PROTO_OW_TRANSFER_TYPE_RESET;
 
                 cmd_prepare(ubus, cmd);
-                cmd_enqueue(ubus, cmd);
-                cmd_wait(cmd);
+                cmd_enqueue(ubus, cmd, true);
 
                 {
                     int errorCode = cmd->errorCode;
@@ -403,7 +401,7 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
     UBUS_TRACE(("[W1]: Writing block of length %d", bufferLength));
 
     if (bufferLength > 0) {
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
         if (cmd != NULL) {
             int totalWritten = 0;
 
@@ -429,8 +427,7 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
                             memcpy(req->data.transfer.data, buffer + totalWritten, toSendDataSize);
                         }
 
-                        cmd_enqueue(ubus, cmd);
-                        cmd_wait(cmd);
+                        cmd_enqueue(ubus, cmd, true);
 
                         if (cmd->errorCode == 0) {
                             totalWritten += toSendDataSize;
@@ -441,7 +438,7 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
                     }
                 }
 
-                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER, cmd->autoDestroy);
             } while (totalWritten != bufferLength);
 
             cmd_free(&cmd);
@@ -457,7 +454,7 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
     if (bufferLength > 0) {
         UbusUart *ubus = (UbusUart *) devData;
 
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
         if (cmd != NULL) {
             do {
                 ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
@@ -478,8 +475,7 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
                     } else {
                         req->data.transfer.dataSize = toReadDataSize;
 
-                        cmd_enqueue(ubus, cmd);
-                        cmd_wait(cmd);
+                        cmd_enqueue(ubus, cmd, true);
 
                         if (cmd->errorCode == 0) {
                             uint16_t readSize = res->data.transfer.dataSize;
@@ -500,7 +496,7 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
                     }
                 }
 
-                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER, cmd->autoDestroy);
             } while (totalRead != bufferLength);
 
             cmd_free(&cmd);
@@ -535,7 +531,7 @@ static u8 _w1TouchBit(void *devData, u8 bit) {
         UBUS_TRACE(("[W1]: touching bit %u", bit));
 
         {
-            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
             if (cmd) {
                 ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
 
@@ -544,8 +540,7 @@ static u8 _w1TouchBit(void *devData, u8 bit) {
                 t->data.touchBit.value = bit;
 
                 cmd_prepare(ubus, cmd);
-                cmd_enqueue(ubus, cmd);
-                cmd_wait(cmd);
+                cmd_enqueue(ubus, cmd, true);
 
                 {
                     int errorCode = cmd->errorCode;
@@ -583,7 +578,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
             size_t written = 0;
 
             do {
-                UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_I2C_TRANSFER);
+                UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_I2C_TRANSFER, false);
                 if (cmd) {
                     ProtoReqI2CTransfer *tx = &cmd->request.request.i2cTransfer;
 
@@ -649,8 +644,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
                         tx->dataSize
                     ));
 
-                    cmd_enqueue(ubus, cmd);
-                    cmd_wait(cmd);
+                    cmd_enqueue(ubus, cmd, true);
 
                     {
                         int errorCode = cmd->errorCode;
@@ -767,7 +761,7 @@ static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long 
                 }
 
                 {
-                    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+                    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
 
                     ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
                     ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
@@ -786,8 +780,7 @@ static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long 
                     req->data.search.type = step.type;
 
                     cmd_prepare(ubus, cmd);
-                    cmd_enqueue(ubus, cmd);
-                    cmd_wait(cmd);
+                    cmd_enqueue(ubus, cmd, true);
 
                     if (res->status != PROTO_OW_STATUS_SEARCH_STEP) {
                         step.wasLast = true;
@@ -903,7 +896,7 @@ static int _gpioDevDirection(UbusUart *ubus, unsigned int offset, bool out, bool
     {
         UBUS_DBG(("CALL offset %u, out: %d, hi: %d", offset, out, hi));
 
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, false);
         if (cmd) {
             ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
 
@@ -914,8 +907,7 @@ static int _gpioDevDirection(UbusUart *ubus, unsigned int offset, bool out, bool
             c->data.setDirection.hi  = hi;
 
             cmd_prepare(ubus, cmd);
-            cmd_enqueue(ubus, cmd);
-            cmd_wait(cmd);
+            cmd_enqueue(ubus, cmd, true);
 
             {
                 int errorCode = cmd->errorCode;
@@ -952,7 +944,7 @@ static int _gpioDevGet(struct gpio_chip *gpio, unsigned int offset) {
 
         UBUS_DBG(("CALL offset %u", offset));
 
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, false);
         if (cmd) {
             ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
 
@@ -960,8 +952,7 @@ static int _gpioDevGet(struct gpio_chip *gpio, unsigned int offset) {
             c->index = offset;
 
             cmd_prepare(ubus, cmd);
-            cmd_enqueue(ubus, cmd);
-            cmd_wait(cmd);
+            cmd_enqueue(ubus, cmd, true);
 
             {
                 int errorCode = cmd->errorCode;
@@ -986,7 +977,7 @@ static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) 
 
     UBUS_DBG(("CALL offset %u, value: %d", offset, value));
 
-    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, false);
     if (cmd) {
         ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
 
@@ -996,8 +987,7 @@ static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) 
         c->data.setValue.hi = value ? 1 : 0;
 
         cmd_prepare(ubus, cmd);
-        cmd_enqueue(ubus, cmd);
-        cmd_wait(cmd);
+        cmd_enqueue(ubus, cmd, true);
 
         {
             int errorCode = cmd->errorCode;
@@ -1012,13 +1002,13 @@ static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) 
 }
 
 static void _gpioIrqMask(struct irq_data *data) {
-        UbusUart *ubus = (UbusUart *) gpiochip_get_data(
-            irq_data_get_irq_chip_data(data)
-        );
+    UbusUart *ubus = (UbusUart *) gpiochip_get_data(
+        irq_data_get_irq_chip_data(data)
+    );
 
     UBUS_DBG(("CALL %lu", data->hwirq));
 
-    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, true);
     if (cmd) {
         ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
 
@@ -1026,18 +1016,7 @@ static void _gpioIrqMask(struct irq_data *data) {
         c->index = data->hwirq;
 
         cmd_prepare(ubus, cmd);
-        cmd_enqueue(ubus, cmd);
-        cmd_wait(cmd);
-
-        {
-            int errorCode = cmd->errorCode;
-
-            if (errorCode != 0) {
-                UBUS_ERR(("Unable to mask gpio-%lu, error code = %d", data->hwirq, errorCode));
-            }
-        }
-
-        cmd_free(&cmd);
+        cmd_enqueue(ubus, cmd, false);
     }
 }
 
@@ -1048,7 +1027,7 @@ static void _gpioIrqUnmask(struct irq_data *data) {
 
     UBUS_DBG(("CALL %lu", data->hwirq));
 
-    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, true);
     if (cmd) {
         ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
 
@@ -1056,18 +1035,7 @@ static void _gpioIrqUnmask(struct irq_data *data) {
         c->index = data->hwirq;
 
         cmd_prepare(ubus, cmd);
-        cmd_enqueue(ubus, cmd);
-        cmd_wait(cmd);
-
-        {
-            int errorCode = cmd->errorCode;
-
-            if (errorCode != 0) {
-                UBUS_ERR(("Unable to unmask gpio-%lu, error code = %d", data->hwirq, errorCode));
-            }
-        }
-
-        cmd_free(&cmd);
+        cmd_enqueue(ubus, cmd, false);
     }
 }
 
@@ -1079,7 +1047,7 @@ static int _gpioIrqSetType(struct irq_data *data, unsigned int type) {
             irq_data_get_irq_chip_data(data)
         );
 
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, true);
         if (cmd == NULL) {
             ret = -ENOMEM;
 
@@ -1121,17 +1089,7 @@ static int _gpioIrqSetType(struct irq_data *data, unsigned int type) {
 
             if (ret == 0) {
                 cmd_prepare(ubus, cmd);
-                cmd_enqueue(ubus, cmd);
-                cmd_wait(cmd);
-
-                int errorCode = cmd->errorCode;
-                if (errorCode != 0) {
-                    UBUS_ERR(("Unable to unmask gpio-%lu, error code = %d", data->hwirq, errorCode));
-
-                    ret = -EINVAL;
-                }
-
-                cmd_free(&cmd);
+                cmd_enqueue(ubus, cmd, false);
             }
         }
     }
@@ -1207,6 +1165,18 @@ static void _handleCmd(UbusUart *ubus, UbusCmd *cmd, bool force) {
     }
 
     complete(&cmd->cmdCompletion);
+
+    {
+        int errorCode = cmd->errorCode;
+
+        if (errorCode != 0) {
+            UBUS_ERR(("Non-waiting command %u returned an error %d", cmd->request.cmd, errorCode));
+        }
+    }
+
+    if (cmd->autoDestroy) {
+        cmd_free(&cmd);
+    }
 }
 
 static int _workerRoutine(void *arg) {
@@ -1217,7 +1187,7 @@ static int _workerRoutine(void *arg) {
     ubus->hwDetected = false;
 
     {
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GET_INFO);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GET_INFO, false);
         if (cmd) {
             int ret = cmd_prepare(ubus, cmd);
             if (ret == 0) {
@@ -1358,7 +1328,7 @@ static int _workerRoutine(void *arg) {
                         }
 
                         if (ret == 0) {
-                            cmd_init(ubus, cmd, PROTO_CMD_RESET);
+                            cmd_init(ubus, cmd, PROTO_CMD_RESET, cmd->autoDestroy);
 
                             ret = cmd_prepare(ubus, cmd);
                             if (ret == 0) {
@@ -1416,7 +1386,6 @@ static int _workerRoutine(void *arg) {
                     list_del(&cmd->list);
                 }
             }
-
             spin_unlock_irqrestore(&ubus->workerQueueLock, flags);
         }
 
