@@ -13,13 +13,9 @@
 extern "C" {
 #endif
 
-typedef struct _UbusBuffer {
-    uint8_t *data;
-    uint16_t dataSize;
-} UbusBuffer;
-
 typedef void (*UbusHubRequestCallback)(ProtoReq *request, ProtoRes *response, void *callbackData);
 typedef void (*UbusHubResponseCallback)(uint8_t *buffer, uint16_t bufferSize, void *callbackData);
+typedef void (*UbusHubEventCallback)(ProtoReqEventReport *event, void *callbackData);
 
 typedef struct _UbusHub {
     ProtoPkt    packet;
@@ -40,6 +36,8 @@ void ubus_hub_setup(
 );
 
 void ubus_hub_putByte(UbusHub *hub, uint8_t byte);
+
+void ubus_hub_reportEvent(UbusHub *hub, UbusHubEventCallback callback, void *callbackData);
 
 void ubus_hub_reset(UbusHub *hub);
 

@@ -144,6 +144,28 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
     }
 }
 
+void ubus_hub_reportEvent(UbusHub *hub, UbusHubEventCallback callback, void *callbackData) {
+    uint8_t  packetBuffer[16]; // TODO: determine the required size automatically
+    ProtoPkt packet;
+    ProtoReq request;
+
+    proto_pkt_init(&packet, packetBuffer, sizeof(packetBuffer), PROTO_CMD_EVENT_REPORT);
+
+    proto_req_init(&request, packet.payload, packet.payloadUsed, packet.code);
+
+    callback(&request.request.eventReport, callbackData);
+
+    proto_req_assign(&request, packet.payload, packet.payloadSize);
+
+    packet.payloadUsed = proto_req_encode(&request, packet.payload, packet.payloadSize);
+
+    proto_pkt_encode(&packet);
+
+    hub->responseCallback(packet.header,  packet.headerUsed,  hub->callbackData);
+    hub->responseCallback(packet.payload, packet.payloadUsed, hub->callbackData);
+    hub->responseCallback(packet.footer,  packet.footerUsed,  hub->callbackData);
+}
+
 void ubus_hub_reset(UbusHub *hub) {
     proto_pkt_dec_reset(&hub->packetDeserializer, &hub->packet);
 }

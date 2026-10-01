@@ -50,6 +50,14 @@ void proto_req_init(ProtoReq *request, void *memory, uint16_t memorySize, uint8_
             }
             break;
 
+        case PROTO_CMD_EVENT_REPORT:
+            {
+                ProtoReqGpioControl *t = &request->request.eventReport;
+
+                t->type = PROTO_EVENT_REPORT_TYPE_UNKNOWN;
+            }
+            break;
+
         default:
             break;
     }

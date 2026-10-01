@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <termios.h>
 
 #include <string>
 
@@ -333,6 +334,8 @@ int main(int argc, char *argv[]) {
         _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445502ULL, 12.1256));
     }
 
+    termios oldTermios;
+
     do {
         ctx.ptyMasterFd = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);
         if (ctx.ptyMasterFd < 0) {
@@ -365,6 +368,29 @@ int main(int argc, char *argv[]) {
             break;
         }
 
+        // make stdin nonblocking
+        {
+            int flags = ::fcntl(STDIN_FILENO, F_GETFL, 0);
+            if (flags == -1) {
+
+            } else {
+                if (::fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == -1) {
+                    // error
+                }
+            }
+        }
+
+        {
+            termios newTermios;
+
+            ::tcgetattr(STDIN_FILENO, &oldTermios);
+
+            newTermios = oldTermios;
+            newTermios.c_lflag &= ~(ICANON | ECHO);
+
+            ::tcsetattr(STDIN_FILENO, TCSANOW, &newTermios);
+        }
+
         ubus_hub_setup(&ctx.hub, packetBuffer, packetSize, _ubusHubRequestCallback, _ubusHubResponseCallback, &ctx);
 
         while (! interrupted) {
@@ -377,8 +403,11 @@ int main(int argc, char *argv[]) {
 
             FD_ZERO(&readSet);
             FD_SET(ctx.ptyMasterFd, &readSet);
+            FD_SET(STDIN_FILENO,    &readSet);
 
-            int selectRet = ::select(ctx.ptyMasterFd + 1, &readSet, NULL, NULL, &timeout);
+            int maxFd = std::max(STDIN_FILENO, ctx.ptyMasterFd);
+
+            int selectRet = ::select(maxFd + 1, &readSet, NULL, NULL, &timeout);
             if (selectRet < 0) {
                 if (errno != EINTR) {
                     ERR(("Select returned an error: {}", std::strerror(errno)));
@@ -395,11 +424,27 @@ int main(int argc, char *argv[]) {
                 } else {
                     ubus_hub_reset(&ctx.hub);
                 }
+
+                if (FD_ISSET(STDIN_FILENO, &readSet)) {
+                    uint8_t byte;
+
+                    while (read(STDIN_FILENO, &byte, 1) == 1) {
+                        switch (byte) {
+                            case '1':
+                            case '2':
+                            case '3':
+                            case '4':
+                                break;
+                        }
+                    }
+                }
             }
         }
 
         DBG(("Main loop terminated"));
     } while (0);
+
+    ::tcsetattr(STDIN_FILENO, TCSANOW, &oldTermios);
 
     if (ctx.ptyMasterFd >= 0) {
         close(ctx.ptyMasterFd);
