@@ -1464,10 +1464,43 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
                         spin_unlock_irqrestore(&ubus->workerQueueLock, flags);
 
                     } else {
+                        ProtoReq req;
                         // bcma/driver_gpio.c
                         // generic_handle_domain_irq_safe(ubus->gpio.irq.domain, 0);
 
                         UBUS_DBG(("Received command %u from target", pkt->code));
+
+                        proto_req_init(&req, pkt->payload, pkt->payloadUsed, pkt->code);
+
+                        if (! proto_req_decode(&req, pkt->payload, pkt->payloadUsed)) {
+                            UBUS_WARN(("Can't decode incoming request"));
+
+                        } else {
+                            proto_req_assign(&req, pkt->payload, pkt->payloadUsed);
+
+                            switch (pkt->code) {
+                                case PROTO_CMD_EVENT_REPORT:
+                                    {
+                                        ProtoReqEventReport *e = (ProtoReqEventReport *) &req.request.eventReport;
+
+                                        switch (e->type) {
+                                            case PROTO_EVENT_REPORT_TYPE_GPIO_IRQ:
+                                                {
+                                                    UBUS_DBG(("Firing interrupt! pio: %u", e->data.gpioIrq.index));
+                                                    generic_handle_domain_irq_safe(ubus->gpio.irq.domain, e->data.gpioIrq.index);
+                                                }
+                                                break;
+
+                                            default:
+                                                UBUS_WARN(("Received not supported event type: %u", e->type));
+                                        }
+                                    }
+                                    break;
+
+                                default:
+                                    break;
+                            }
+                        }
                     }
                 }
 

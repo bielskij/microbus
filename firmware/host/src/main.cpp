@@ -319,6 +319,20 @@ static void _intHandler(int signo) {
     interrupted = true;
 }
 
+typedef struct _FillReportCallbackData {
+    bool    rising;
+    uint8_t index;
+} FillReportCallbackData;
+
+static void _fillReportCallback(ProtoReqEventReport *event, void *callbackData) {
+    FillReportCallbackData *data = (FillReportCallbackData *) callbackData;
+
+    event->type = PROTO_EVENT_REPORT_TYPE_GPIO_IRQ;
+
+    event->data.gpioIrq.index  = data->index;
+    event->data.gpioIrq.rising = data->rising;
+}
+
 int main(int argc, char *argv[]) {
     spdlog::set_level(spdlog::level::debug);
 
@@ -434,6 +448,14 @@ int main(int argc, char *argv[]) {
                             case '2':
                             case '3':
                             case '4':
+                                {
+                                    FillReportCallbackData data;
+
+                                    data.index  = byte - '1';
+                                    data.rising = false;
+
+                                    ubus_hub_reportEvent(&ctx.hub, _fillReportCallback, &data);
+                                }
                                 break;
                         }
                     }

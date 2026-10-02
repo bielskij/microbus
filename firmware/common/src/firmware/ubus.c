@@ -149,7 +149,7 @@ void ubus_hub_reportEvent(UbusHub *hub, UbusHubEventCallback callback, void *cal
     ProtoPkt packet;
     ProtoReq request;
 
-    proto_pkt_init(&packet, packetBuffer, sizeof(packetBuffer), PROTO_CMD_EVENT_REPORT);
+    proto_pkt_init(&packet, packetBuffer, sizeof(packetBuffer), PROTO_CMD_EVENT_REPORT, 0);
 
     proto_req_init(&request, packet.payload, packet.payloadUsed, packet.code);
 

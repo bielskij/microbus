@@ -52,7 +52,7 @@ void proto_req_init(ProtoReq *request, void *memory, uint16_t memorySize, uint8_
 
         case PROTO_CMD_EVENT_REPORT:
             {
-                ProtoReqGpioControl *t = &request->request.eventReport;
+                ProtoReqEventReport *t = &request->request.eventReport;
 
                 t->type = PROTO_EVENT_REPORT_TYPE_UNKNOWN;
             }
@@ -252,6 +252,32 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
                                 }
 
                                 PTR_U8(memory)[ret++] = val;
+                            }
+                            break;
+                    }
+                }
+                break;
+
+            case PROTO_CMD_EVENT_REPORT:
+                {
+                    ProtoReqEventReport *c = &request->request.eventReport;
+
+                    PTR_U8(memory)[ret++] = (c->type << 4) & 0xf0;
+
+                    switch (c->type) {
+                        case PROTO_EVENT_REPORT_TYPE_UNKNOWN:
+                            break;
+
+                        case PROTO_EVENT_REPORT_TYPE_GPIO_IRQ:
+                            {
+                                PTR_U8(memory)[ret - 1] |= (c->data.gpioIrq.index & 0x0f);
+
+                                if (c->data.gpioIrq.rising) {
+                                    PTR_U8(memory)[ret++] = PROTO_EVENT_REPORT_GPIO_FLAG_RISING;
+
+                                } else {
+                                    PTR_U8(memory)[ret++] = 0;
+                                }
                             }
                             break;
                     }
@@ -476,6 +502,41 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                                     }
                                 }
                                 break;
+                        }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_EVENT_REPORT:
+                {
+                    ProtoReqEventReport *c = &request->request.eventReport;
+
+                    if (ret) {
+                        ret = memorySize > 0;
+                        if (ret) {
+                            c->type  = memoryP[0] >> 4;
+
+                            switch (c->type) {
+                                case PROTO_EVENT_REPORT_TYPE_GPIO_IRQ:
+                                    {
+                                        c->data.gpioIrq.index = memoryP[0] & 0x0f;
+
+                                        memoryP++;
+                                        memorySize--;
+
+                                        ret = memorySize > 0;
+                                        if (ret) {
+                                            c->data.gpioIrq.rising = (memoryP[0] & PROTO_EVENT_REPORT_GPIO_FLAG_RISING) != 0;
+
+                                            memoryP++;
+                                            memorySize--;
+                                        }
+                                    }
+                                    break;
+
+                                default:
+                                    break;
+                            }
                         }
                     }
                 }

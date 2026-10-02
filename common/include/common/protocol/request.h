@@ -71,6 +71,7 @@ typedef struct _ProtoReqEventReport {
     union {
         struct {
             uint8_t rising;
+            uint8_t index;
         } gpioIrq;
     } data;
 } ProtoReqEventReport;
