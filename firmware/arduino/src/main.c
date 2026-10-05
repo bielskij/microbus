@@ -28,6 +28,7 @@ typedef struct _GpioMap {
     volatile uint8_t *pin;
     volatile uint8_t *pcmsk;
     uint8_t           index;
+    uint8_t           pcindex;
     uint8_t           falling:1;
     uint8_t           rising:1;
 } GpioMap;
@@ -40,10 +41,10 @@ static uint8_t _ioEventQueueTail = 0;
 static uint8_t _dataBuffer[DATA_BUFFER_SIZE] = { 0 };
 
 static GpioMap _gpio[] = {
-    { &DDRD, &PORTD, &PIND, &PCMSK2, PD2, 1, 1 },
-    { &DDRD, &PORTD, &PIND, &PCMSK2, PD3, 1, 1 },
-    { &DDRD, &PORTD, &PIND, &PCMSK2, PD4, 1, 1 },
-    { &DDRD, &PORTD, &PIND, &PCMSK2, PD5, 1, 1 }
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD2, PCIE2, 1, 1 },
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD3, PCIE2, 1, 1 },
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD4, PCIE2, 1, 1 },
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD5, PCIE2, 1, 1 }
 };
 
 static uint8_t _gpioState[3] = { 0 };
@@ -89,7 +90,7 @@ static bool _queue_get(uint8_t *data) {
 
     *data = _ioEventQueue[tail];
 
-    tail = (tail + 1) & IO_EVENT_QUEUE_MASK;
+    _ioEventQueueTail = (tail + 1) & IO_EVENT_QUEUE_MASK;
 
     return true;
 }
@@ -137,7 +138,7 @@ static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *ca
                 ProtoResGetInfo *info = &response->response.getInfo;
 
                 info->features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW | PROTO_FEATURE_GPIO;
-                
+
                 info->gpio.count = ARRAY_SIZE(_gpio);
             }
             break;
@@ -462,6 +463,11 @@ int main(int argc, char *argv[]) {
 
     uart_initialize();
     i2c_initialize();
+
+    // Enable interrupt on gpio
+    for (uint8_t i = 0; i < ARRAY_SIZE(_gpio); i++) {
+        PCICR |= _BV(_gpio[i].pcindex);
+    }
 
     {
         PIO_SET_INPUT(OW_PIO_BANK, OW_PIO_PIN);
