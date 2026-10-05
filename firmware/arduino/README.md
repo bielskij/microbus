@@ -18,10 +18,10 @@ Arduino pin configuration:
      ___│ A1                      D8         │___
      ___│ A2                      D7         │___
      ___│ A3                      D6         │___
- SDA ___│ A4 / SDA                D5         │___
- SCL ___│ A5 / SCL                D4         │___
-     ___│ A6                      D3         │___
-     ___│ A7                      D2         │___
+ SDA ___│ A4 / SDA                D5 / PD5   │___ GPIO3
+ SCL ___│ A5 / SCL                D4 / PD4   │___ GPIO2
+     ___│ A6                      D3 / PD3   │___ GPIO1
+     ___│ A7                      D2 / PD2   │___ GPIO0
      ___│ 5V                      D1/TX      │___
      ___│ RST                     D0/RX      │___
      ___│ GND                     RST        │___

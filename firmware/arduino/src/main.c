@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Jarosław Bielski <bielski.j@gmail.com>
 
+#include <avr/interrupt.h>
+
 #include <util/twi.h>
 #include <util/delay.h>
+#include <util/atomic.h>
 
 #include "common/protocol.h"
 #include "common/protocol/command.h"
@@ -13,22 +16,129 @@
 #include "firmware/i2c.h"
 #include "firmware/ow.h"
 
-
 #define OW_PIO_BANK C
 #define OW_PIO_PIN  0
 
-#define DATA_BUFFER_SIZE 512
+#define IO_EVENT_QUEUE_SIZE 32
+#define IO_EVENT_QUEUE_MASK (IO_EVENT_QUEUE_SIZE - 1)
 
+typedef struct _GpioMap {
+    volatile uint8_t *ddr;
+    volatile uint8_t *port;
+    volatile uint8_t *pin;
+    volatile uint8_t *pcmsk;
+    uint8_t           index;
+    uint8_t           falling:1;
+    uint8_t           rising:1;
+} GpioMap;
+
+static uint8_t _ioEventQueue[IO_EVENT_QUEUE_SIZE] = { 0 };
+static uint8_t _ioEventQueueHead = 0;
+static uint8_t _ioEventQueueTail = 0;
+
+#define DATA_BUFFER_SIZE 512
 static uint8_t _dataBuffer[DATA_BUFFER_SIZE] = { 0 };
 
+static GpioMap _gpio[] = {
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD2, 1, 1 },
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD3, 1, 1 },
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD4, 1, 1 },
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD5, 1, 1 }
+};
+
+static uint8_t _gpioState[3] = { 0 };
+
+static void _handleGpioIsr(volatile uint8_t *pinReg, uint8_t stateIdx, uint8_t isrmask);
+
+ISR(PCINT0_vect) {
+    _handleGpioIsr(&PINB, 0, PCMSK0);
+}
+
+ISR(PCINT1_vect) {
+    _handleGpioIsr(&PINC, 1, PCMSK1);
+}
+
+ISR(PCINT2_vect) {
+    _handleGpioIsr(&PIND, 2, PCMSK2);
+}
+
+static void _queue_clear() {
+    _ioEventQueueHead = 0;
+    _ioEventQueueTail = 0;
+}
+
+static void _queue_put(uint8_t data) {
+    uint8_t head = _ioEventQueueHead;
+    uint8_t next = (head + 1) & IO_EVENT_QUEUE_MASK;
+
+    if (next == _ioEventQueueTail) {
+        return;
+    }
+
+    _ioEventQueue[head] = data;
+
+    _ioEventQueueHead = next;
+}
+
+static bool _queue_get(uint8_t *data) {
+    uint8_t tail = _ioEventQueueTail;
+
+    if (tail == _ioEventQueueHead) {
+        return false;
+    }
+
+    *data = _ioEventQueue[tail];
+
+    tail = (tail + 1) & IO_EVENT_QUEUE_MASK;
+
+    return true;
+}
+
+static void _handleGpioIsr(volatile uint8_t *pinReg, uint8_t stateIdx, uint8_t isrmask) {
+    uint8_t current = *pinReg;
+    uint8_t changed = (_gpioState[stateIdx] ^ current) & isrmask;
+
+    if (changed) {
+        for (uint8_t i = 0; i < ARRAY_SIZE(_gpio); i++) {
+            const GpioMap *gpio = &_gpio[i];
+
+            if (gpio->pin == pinReg) {
+                uint8_t gpioMask = (1 << gpio->index);
+
+                if (changed & gpioMask) {
+                    if (current & gpioMask) {
+                        if (gpio->rising) {
+                            _queue_put(i | 0x80);
+                        }
+
+                    } else {
+                        if (gpio->falling) {
+                            _queue_put(i);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    _gpioState[stateIdx] = current;
+}
 
 static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *callbackData) {
     switch (request->cmd) {
+        case PROTO_CMD_RESET:
+            {
+                _queue_clear();
+            }
+            break;
+
         case PROTO_CMD_GET_INFO:
             {
                 ProtoResGetInfo *info = &response->response.getInfo;
 
-                info->features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW;
+                info->features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW | PROTO_FEATURE_GPIO;
+                
+                info->gpio.count = ARRAY_SIZE(_gpio);
             }
             break;
 
@@ -105,8 +215,6 @@ static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *ca
             {
                 ProtoReqOwTransfer *req = &request->request.owTransfer;
                 ProtoResOwTransfer *res = &response->response.owTransfer;
-
-                res->type = req->type;
 
                 switch (req->type) {
                     case PROTO_OW_TRANSFER_TYPE_RESET:
@@ -192,6 +300,78 @@ static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *ca
             }
             break;
 
+        case PROTO_CMD_GPIO_CONTROL:
+            {
+                ProtoReqGpioControl *req = &request->request.gpioControl;
+                ProtoResGpioControl *res = &response->response.gpioControl;
+
+                GpioMap *gpio = &_gpio[req->index];
+
+                uint8_t mask = _BV(gpio->index);
+
+                switch (req->type) {
+                    case PROTO_GPIO_CONTROL_TYPE_GET_VALUE:
+                        {
+                            res->data.getValue.hi = (*gpio->pin & mask) != 0;
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_SET_VALUE:
+                        {
+                            if (*gpio->ddr & mask) {
+                                if (req->data.setValue.hi) {
+                                    *gpio->port |= mask;
+
+                                } else {
+                                    *gpio->port &= ~mask;
+                                }
+                            }
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_IRQ_MASK:
+                        ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                            *gpio->pcmsk &= ~_BV(gpio->index);
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK:
+                        ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                            // Refresh state
+                            _gpioState[req->index] = *gpio->pin;
+
+                            *gpio->pcmsk |= _BV(gpio->index);
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION:
+                        {
+                            if (req->data.setDirection.out) {
+                                if (req->data.setDirection.hi) {
+                                    *gpio->port |= mask;
+
+                                } else {
+                                    *gpio->port &= ~mask;
+                                }
+
+                                *gpio->ddr |= mask;
+
+                            } else {
+                                *gpio->ddr  &= ~mask;
+                                *gpio->port &= ~mask;
+                            }
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE:
+                        ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                            gpio->rising  = req->data.setIrqType.rising;
+                            gpio->falling = req->data.setIrqType.falling;
+                        }
+                        break;
+                }
+            }
+
         default:
             break;
     }
@@ -268,6 +448,15 @@ static bool _owPioCallback(uint16_t lowUs, uint16_t readUs, uint16_t hiUs) {
     return ret;
 }
 
+static void _eventCallback(ProtoReqEventReport *event, void *callbackData) {
+    uint8_t *data = (uint8_t *)callbackData;
+
+    event->type = PROTO_EVENT_REPORT_TYPE_GPIO_IRQ;
+
+    event->data.gpioIrq.index  = (*data) & 0x0f;
+    event->data.gpioIrq.rising = (*data) >> 7;
+}
+
 int main(int argc, char *argv[]) {
     UbusHub ubusHub;
 
@@ -303,8 +492,11 @@ int main(int argc, char *argv[]) {
         NULL
     );
 
+    sei();
     {
         uint16_t idleCounter = 0;
+        uint8_t  ioEvent;
+        bool     ioEventReady;
 
         while (1) {
             if (! uart_poll()) {
@@ -316,6 +508,16 @@ int main(int argc, char *argv[]) {
                 idleCounter = 0;
 
                 ubus_hub_putByte(&ubusHub, uart_get());
+            }
+
+            {
+                ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                    ioEventReady = _queue_get(&ioEvent);
+                }
+
+                if (ioEventReady) {
+                    ubus_hub_reportEvent(&ubusHub, _eventCallback, &ioEvent);
+                }
             }
         }
     }
