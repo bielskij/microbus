@@ -18,13 +18,13 @@
 #define MICROBUS_FEATURE_FLAG_OW   (1 << 1)
 #define MICROBUS_FEATURE_FLAG_GPIO (1 << 2)
 
-enum MicrobusInterface {
-    I2C,
-    OW,
-    GPIO
-};
+typedef enum _MicrobusInterface {
+    MICROBUS_INTERFACE_I2C,
+    MICROBUS_INTERFACE_OW,
+    MICROBUS_INTERFACE_GPIO
+} MicrobusInterface;
 
-struct MicrobusSearchStep {
+typedef struct _MicrobusSearchStep {
     __u8  type;
     __u64 rn;
     __u8  descBit;
@@ -32,7 +32,7 @@ struct MicrobusSearchStep {
     __u8  wasLast;
     __u8  found;
     __u8  reserved[3];
-};
+} MicrobusSearchStep;
 
 typedef struct _MicrobusI2cInformation {
     __u8 reserved;
@@ -78,9 +78,9 @@ typedef struct _MicrobusI2cDetachParameters {
 
 #define MICROBUS_IOC_RESET           _IOR (MICROBUS_IOC_MAGIC, 0, __u8)
 
-#define MICROBUS_IOC_SEARCH_START    _IOWR(MICROBUS_IOC_MAGIC, 1, struct MicrobusSearchStep)
+#define MICROBUS_IOC_SEARCH_START    _IOWR(MICROBUS_IOC_MAGIC, 1, MicrobusSearchStep)
 
-#define MICROBUS_IOC_SEARCH_STEP     _IOWR(MICROBUS_IOC_MAGIC, 2, struct MicrobusSearchStep)
+#define MICROBUS_IOC_SEARCH_STEP     _IOWR(MICROBUS_IOC_MAGIC, 2, MicrobusSearchStep)
 
 #define MICROBUS_IOC_I2C_ATTACH      _IOW (MICROBUS_IOC_MAGIC, 3, MicrobusI2cAttachParameters)
 

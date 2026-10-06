@@ -452,7 +452,7 @@ int main(int argc, char *argv[]) {
                                     FillReportCallbackData data;
 
                                     data.index  = byte - '1';
-                                    data.rising = false;
+                                    data.rising = true;
 
                                     ubus_hub_reportEvent(&ctx.hub, _fillReportCallback, &data);
                                 }

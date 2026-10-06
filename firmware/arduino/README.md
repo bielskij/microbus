@@ -6,28 +6,28 @@ Arduino pin configuration:
  - **PC5** (A5): I²C SCL
 
 ```text
-                 ARDUINO NANO V3.0
+                     ARDUINO NANO V3.0
 
-        ┌────────────────────────────────────┐
-        │               USB                  │
-        │                                    │
-     ___│ D13 / SCK               D12 / MISO │___
-     ___│ 3V3                     D11 / MOSI │___
-     ___│ AREF                    D10 / SS   │___
- OW  ___│ A0                      D9         │___
-     ___│ A1                      D8         │___
-     ___│ A2                      D7         │___
-     ___│ A3                      D6         │___
- SDA ___│ A4 / SDA                D5 / PD5   │___ GPIO3
- SCL ___│ A5 / SCL                D4 / PD4   │___ GPIO2
-     ___│ A6                      D3 / PD3   │___ GPIO1
-     ___│ A7                      D2 / PD2   │___ GPIO0
-     ___│ 5V                      D1/TX      │___
-     ___│ RST                     D0/RX      │___
-     ___│ GND                     RST        │___
-     ___│ VIN                     GND        │___
-        │                                    │
-        └────────────────────────────────────┘
+        ┌─────────────────────────────────────────┐
+        │               USB                       │
+        │                                         │
+     ___│ D13 / SCK              D12 / PB4 (MISO) │___
+     ___│ 3V3                    D11 / PB3 (MOSI) │___
+     ___│ AREF                   D10 / PB2 (SS)   │___
+ OW  ___│ A0 / PC0               D9  / PB1        │___
+     ___│ A1 / PC1               D8  / PB0        │___
+     ___│ A2 / PC2               D7  / PD7        │___
+     ___│ A3 / PC3               D6  / PD6        │___
+ SDA ___│ A4 / PC4 (SDA)         D5  / PD5        │___ GPIO3
+ SCL ___│ A5 / PC5 (SCL)         D4  / PD4        │___ GPIO2
+     ___│ A6                     D3  / PD3        │___ GPIO1
+     ___│ A7                     D2  / PD2        │___ GPIO0
+     ___│ 5V                     GND              │___
+     ___│ RST / PC6              RST  / PC6       │___
+     ___│ GND                    D0   / PD0 (RX)  │___
+     ___│ VIN                    D1   / PD1 (TX)  │___
+        │                                         │
+        └─────────────────────────────────────────┘
 ```
 
 ## Compilation

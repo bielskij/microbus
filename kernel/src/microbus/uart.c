@@ -754,7 +754,7 @@ static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long 
         case MICROBUS_IOC_SEARCH_START:
         case MICROBUS_IOC_SEARCH_STEP:
             {
-                struct MicrobusSearchStep step;
+                MicrobusSearchStep step;
 
                 if (copy_from_user(&step, (void __user *) arg, sizeof(step))) {
                     return -EFAULT;
@@ -1513,28 +1513,27 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
 }
 
 static void _removeI2cDevice(UbusUart *ubus, I2cDevice *dev) {
-    if (dev->client) {
-        UBUS_LOG(("Removing i2c device for address: %#02x", dev->client->addr));
+    if (dev) {
+        if (dev->client) {
+            UBUS_LOG(("Removing I2C device at address %#02x", dev->client->addr));
 
-        i2c_unregister_device(dev->client);
+            i2c_unregister_device(dev->client);
 
-        dev->client = NULL;
+            dev->client = NULL;
+        }
+
+        if (dev->gpioLookup) {
+            gpiod_remove_lookup_table(dev->gpioLookup);
+
+            kfree(dev->gpioLookup);
+
+            dev->gpioLookup = NULL;
+        }
+
+        list_del(&dev->listItem);
+
+        kfree(dev);
     }
-
-    if (dev->gpioLookup) {
-        gpiod_remove_lookup_table(dev->gpioLookup);
-
-        kfree(dev->gpioLookup);
-
-        dev->gpioLookup = NULL;
-    }
-
-
-    // TODO: Unregister
-
-    list_del(&dev->listItem);
-
-    kfree(dev);
 }
 
 static void _ldiscCleanup(UbusUart **ubus) {
@@ -1753,74 +1752,138 @@ static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long a
 
                         ret = -EFAULT;
 
+                    } else if (! (ubus->information.features & MICROBUS_FEATURE_FLAG_I2C)) {
+                        UBUS_WARN(("I2C interface is not supported by the connected Microbus connector"));
+
+                        ret = -ENOTSUPP;
+
                     } else {
-                        int irq = 0;
+                        I2cDevice *dev = NULL;
+                        
+                        mutex_lock(&ubus->i2cDevicesLock);
+                        {
+                            I2cDevice *it = NULL;
 
-                        if (params.resourceCount > 0) {
-                            __u16 count = 0;
-
-                            for (__u16 i = 0; i < params.resourceCount; i++) {
-                                MicrobusResource *res = &params.resources[i];
-
-                                if (strncmp(res->name, "interrupt-source", MICROBUS_NAME_LEN) == 0) {
-                                    struct gpio_desc *desc = gpio_device_get_desc(ubus->gpio.gpiodev, 2);
-                                    if (desc) {
-                                        irq = gpiod_to_irq(desc);
-                                    }
-
-                                } else {
-                                    count++;
+                            list_for_each_entry(it, &ubus->i2cDevices, listItem) {
+                                if (it->info.addr == params.address) {
+                                    dev = it;
+                                    break;
                                 }
                             }
 
-                            I2cDevice *dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+                            if (dev != NULL) {
+                                UBUS_WARN(("I2C device at address %#02x is already registered", params.address));
 
-                            INIT_LIST_HEAD(&dev->listItem);
-
-                            if (count == 0) {
-                                dev->gpioLookup = NULL;
+                                dev = NULL;
+                                ret = -EEXIST;
 
                             } else {
-                                dev->gpioLookup = kzalloc(struct_size(dev->gpioLookup, table, count + 1), GFP_KERNEL);
+                                dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 
-                                snprintf(dev->devId, MICROBUS_NAME_LEN, "%u-%04x", ubus->i2cAdapter.nr, params.address);
+                                INIT_LIST_HEAD(&dev->listItem);
 
-                                dev->gpioLookup->dev_id = dev->devId;
+                                list_add_tail(&dev->listItem, &ubus->i2cDevices);
+                            }
+                        }
+                        mutex_unlock(&ubus->i2cDevicesLock);
 
-                                // Fill board info
-                                strncpy(dev->info.type, params.driver, I2C_NAME_SIZE);
-                                dev->info.addr = params.address;
-                                dev->info.irq  = irq;
+                        if (ret == 0) {
+                            int irq = 0;
 
-                                count = 0;
+                            if (params.resourceCount > 0) {
+                                __u16 gpioCount = 0;
+
                                 for (__u16 i = 0; i < params.resourceCount; i++) {
                                     MicrobusResource *res = &params.resources[i];
 
-                                    if (strncmp(res->name, "interrupt-source", MICROBUS_NAME_LEN) != 0) {
-                                        GpioMapping *m = &dev->gpioMappings[count];
+                                    if (strncmp(res->name, "interrupt-source", MICROBUS_NAME_LEN) == 0) {
+                                        if (res->interface == MICROBUS_INTERFACE_GPIO) {
+                                            if (! (ubus->information.features & MICROBUS_FEATURE_FLAG_GPIO)) {
+                                                UBUS_WARN(("GPIO interface is not supported by the connected Microbus connector"));
 
-                                        strncpy(m->name, res->name, MICROBUS_NAME_LEN);
+                                            } else {
+                                                struct gpio_desc *desc = gpio_device_get_desc(ubus->gpio.gpiodev, res->index);
+                                                if (desc) {
+                                                    irq = gpiod_to_irq(desc);
 
-                                        dev->gpioLookup->table[count] = GPIO_LOOKUP(ubus->gpio.label, res->index, m->name, GPIO_ACTIVE_HIGH);
+                                                } else {
+                                                    UBUS_WARN(("Cannot get GPIO description for offset %u", res->index));
+                                                }
+                                            }
 
-                                        UBUS_DBG(("Adding gpio lookup: parent: %s, index: %u, name: '%s' for dev: '%s'", ubus->gpio.label, res->index, m->name, dev->devId));
+                                        } else {
+                                            UBUS_WARN(("Not supported interface: %u", res->interface));
 
-                                        count++;
+                                            continue;
+                                        }
+
+                                    } else {
+                                        gpioCount++;
                                     }
                                 }
 
-                                gpiod_add_lookup_table(dev->gpioLookup);
+                                if (gpioCount == 0) {
+                                    dev->gpioLookup = NULL;
 
-                                dev->client = i2c_new_client_device(&ubus->i2cAdapter, &dev->info);
+                                } else {
+                                    if (! (ubus->information.features & MICROBUS_FEATURE_FLAG_GPIO)) {
+                                        UBUS_WARN(("Requested attachment of %u GPIO pins, but GPIO is not supported by the connected Microbus connector", gpioCount));
 
-                                UBUS_LOG(("Registered new i2c device at address %#02x, for module: '%s', resources count: %u", params.address, params.driver, params.resourceCount));
+                                    } else {
+                                        dev->gpioLookup = kzalloc(struct_size(dev->gpioLookup, table, gpioCount + 1), GFP_KERNEL);
+
+                                        snprintf(dev->devId, MICROBUS_NAME_LEN, "%u-%04x", ubus->i2cAdapter.nr, params.address);
+
+                                        dev->gpioLookup->dev_id = dev->devId;
+
+                                        gpioCount = 0;
+                                        for (__u16 i = 0; i < params.resourceCount; i++) {
+                                            MicrobusResource *res = &params.resources[i];
+
+                                            if (
+                                                (strncmp(res->name, "interrupt-source", MICROBUS_NAME_LEN) != 0) &&
+                                                res->interface == MICROBUS_INTERFACE_GPIO
+                                            ) {
+                                                GpioMapping *m = &dev->gpioMappings[gpioCount];
+
+                                                strncpy(m->name, res->name, MICROBUS_NAME_LEN);
+
+                                                dev->gpioLookup->table[gpioCount++] = GPIO_LOOKUP(ubus->gpio.label, res->index, m->name, GPIO_ACTIVE_HIGH);
+
+                                                UBUS_DBG(("Adding gpio lookup for pin %u, name '%s', device '%s'", res->index, m->name, dev->devId));
+                                            }
+                                        }
+
+                                        gpiod_add_lookup_table(dev->gpioLookup);
+                                    }
+                                }
                             }
 
-                            mutex_lock(&ubus->i2cDevicesLock);
-                            {
-                                list_add_tail(&dev->listItem, &ubus->i2cDevices);
+                            // Fill board info
+                            strncpy(dev->info.type, params.driver, I2C_NAME_SIZE);
+                            
+                            dev->info.addr = params.address;
+                            dev->info.irq  = irq;
+
+                            dev->client = i2c_new_client_device(&ubus->i2cAdapter, &dev->info);
+                            if (dev->client) {
+                                UBUS_LOG(("Registered new I2C device at address %#02x for driver '%s', resources: %u, parent IRQ: %d", 
+                                    params.address, params.driver, params.resourceCount, irq
+                                ));
+
+                                mutex_lock(&ubus->i2cDevicesLock);
+                                {
+                                    
+                                }
+                                mutex_unlock(&ubus->i2cDevicesLock);
+
+                            } else {
+                                ret = -EFAULT;
                             }
-                            mutex_unlock(&ubus->i2cDevicesLock);
+                        }
+
+                        if (ret != 0) {
+                           _removeI2cDevice(ubus, dev);
                         }
                     }
                 }
@@ -1838,6 +1901,8 @@ static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long a
                         ret = -EFAULT;
 
                     } else {
+                        bool removed = false;
+
                         mutex_lock(&ubus->i2cDevicesLock);
                         {
                             I2cDevice *dev;
@@ -1846,10 +1911,18 @@ static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long a
                             list_for_each_entry_safe(dev, tmp, &ubus->i2cDevices, listItem) {
                                 if (dev->info.addr == params.address) {
                                     _removeI2cDevice(ubus, dev);
+
+                                    removed = true;
                                 }
                             }
                         }
                         mutex_unlock(&ubus->i2cDevicesLock);
+
+                        if (! removed) {
+                            UBUS_WARN(("I2C device at address %#02x was not found", params.address));
+
+                            ret = -ENODEV;
+                        }
                     }
                 }
                 break;

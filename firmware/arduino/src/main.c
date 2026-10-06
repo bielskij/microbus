@@ -40,11 +40,14 @@ static uint8_t _ioEventQueueTail = 0;
 #define DATA_BUFFER_SIZE 512
 static uint8_t _dataBuffer[DATA_BUFFER_SIZE] = { 0 };
 
+#define DEFAULT_ENABLE_IRQ_RISING   1
+#define DEFAULT_ENABLE_IRQ_FALLING  1
+
 static GpioMap _gpio[] = {
-    { &DDRD, &PORTD, &PIND, &PCMSK2, PD2, PCIE2, 1, 1 },
-    { &DDRD, &PORTD, &PIND, &PCMSK2, PD3, PCIE2, 1, 1 },
-    { &DDRD, &PORTD, &PIND, &PCMSK2, PD4, PCIE2, 1, 1 },
-    { &DDRD, &PORTD, &PIND, &PCMSK2, PD5, PCIE2, 1, 1 }
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD2, PCIE2, DEFAULT_ENABLE_IRQ_FALLING, DEFAULT_ENABLE_IRQ_RISING },
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD3, PCIE2, DEFAULT_ENABLE_IRQ_FALLING, DEFAULT_ENABLE_IRQ_RISING },
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD4, PCIE2, DEFAULT_ENABLE_IRQ_FALLING, DEFAULT_ENABLE_IRQ_RISING },
+    { &DDRD, &PORTD, &PIND, &PCMSK2, PD5, PCIE2, DEFAULT_ENABLE_IRQ_FALLING, DEFAULT_ENABLE_IRQ_RISING }
 };
 
 static uint8_t _gpioState[3] = { 0 };
@@ -129,6 +132,17 @@ static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *ca
     switch (request->cmd) {
         case PROTO_CMD_RESET:
             {
+                for (uint8_t i = 0; i < ARRAY_SIZE(_gpio); i++) {
+                    GpioMap *m = &_gpio[i];
+
+                    (*m->pcmsk) &= ~_BV(m->index);
+                    
+                    m->falling = DEFAULT_ENABLE_IRQ_FALLING;
+                    m->rising  = DEFAULT_ENABLE_IRQ_RISING;
+
+                    PCICR &= ~_BV(m->pcindex);
+                }
+
                 _queue_clear();
             }
             break;
