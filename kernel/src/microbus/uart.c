@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // SPDX-FileCopyrightText: 2026 Jarosław Bielski <bielski.j@gmail.com>
 
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/w1.h>
@@ -972,33 +973,49 @@ static int _gpioDevGet(struct gpio_chip *gpio, unsigned int offset) {
     return ret;
 }
 
-static void _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) {
-    UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
+    #define GPIO_SET_RETURN int
+    #define GPIO_SET_RETURN_VALUE(x) return (x)
+#else
+    #define GPIO_SET_RETURN void
+    #define GPIO_SET_RETURN_VALUE(x)
+#endif
 
-    UBUS_DBG(("CALL offset %u, value: %d", offset, value));
+static GPIO_SET_RETURN _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) {
+    int ret = 0;
 
-    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, false);
-    if (cmd) {
-        ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+    {
+        UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
 
-        c->type  = PROTO_GPIO_CONTROL_TYPE_SET_VALUE;
-        c->index = offset;
+        UBUS_DBG(("CALL offset %u, value: %d", offset, value));
 
-        c->data.setValue.hi = value ? 1 : 0;
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, false);
+        if (cmd) {
+            ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
 
-        cmd_prepare(ubus, cmd);
-        cmd_enqueue(ubus, cmd, true);
+            c->type  = PROTO_GPIO_CONTROL_TYPE_SET_VALUE;
+            c->index = offset;
 
-        {
-            int errorCode = cmd->errorCode;
+            c->data.setValue.hi = value ? 1 : 0;
 
-            if (errorCode != 0) {
-                UBUS_ERR(("Unable to set value %d on gpio-%u, error code = %d", value, offset, errorCode));
+            cmd_prepare(ubus, cmd);
+            cmd_enqueue(ubus, cmd, true);
+
+            {
+                int errorCode = cmd->errorCode;
+
+                if (errorCode != 0) {
+                    UBUS_ERR(("Unable to set value %d on gpio-%u, error code = %d", value, offset, errorCode));
+
+                    ret = -EFAULT;
+                }
             }
-        }
 
-        cmd_free(&cmd);
+            cmd_free(&cmd);
+        }
     }
+
+    GPIO_SET_RETURN_VALUE(ret);
 }
 
 static void _gpioIrqMask(struct irq_data *data) {
@@ -1268,7 +1285,8 @@ static int _workerRoutine(void *arg) {
                             }
                         }
 
-                        if ((info->features & PROTO_FEATURE_OW) != 0) {
+                        // if ((info->features & PROTO_FEATURE_OW) != 0) {
+                        if (0) {
                             UBUS_DBG(("Registering new 1wire device in kernel"));
 
                             ubus->w1Master.data = ubus;
@@ -1759,7 +1777,7 @@ static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long a
 
                     } else {
                         I2cDevice *dev = NULL;
-                        
+
                         mutex_lock(&ubus->i2cDevicesLock);
                         {
                             I2cDevice *it = NULL;
@@ -1861,19 +1879,19 @@ static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long a
 
                             // Fill board info
                             strncpy(dev->info.type, params.driver, I2C_NAME_SIZE);
-                            
+
                             dev->info.addr = params.address;
                             dev->info.irq  = irq;
 
                             dev->client = i2c_new_client_device(&ubus->i2cAdapter, &dev->info);
                             if (dev->client) {
-                                UBUS_LOG(("Registered new I2C device at address %#02x for driver '%s', resources: %u, parent IRQ: %d", 
+                                UBUS_LOG(("Registered new I2C device at address %#02x for driver '%s', resources: %u, parent IRQ: %d",
                                     params.address, params.driver, params.resourceCount, irq
                                 ));
 
                                 mutex_lock(&ubus->i2cDevicesLock);
                                 {
-                                    
+
                                 }
                                 mutex_unlock(&ubus->i2cDevicesLock);
 
