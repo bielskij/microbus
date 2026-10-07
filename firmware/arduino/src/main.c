@@ -139,8 +139,6 @@ static void _ubusRequestCallback(ProtoReq *request, ProtoRes *response, void *ca
                     
                     m->falling = DEFAULT_ENABLE_IRQ_FALLING;
                     m->rising  = DEFAULT_ENABLE_IRQ_RISING;
-
-                    PCICR &= ~_BV(m->pcindex);
                 }
 
                 _queue_clear();
