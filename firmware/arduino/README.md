@@ -4,6 +4,10 @@ Arduino pin configuration:
  - **PC0** (A0): 1-Wire bus
  - **PC4** (A4): I²C SDA
  - **PC5** (A5): I²C SCL
+ - **PD2** (D2): GPIO0
+ - **PD3** (D3): GPIO1
+ - **PD4** (D4): GPIO2
+ - **PD5** (D5): GPIO3
 
 ```text
                      ARDUINO NANO V3.0

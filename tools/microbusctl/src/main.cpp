@@ -72,7 +72,7 @@ int main(int argc, char* argv[]) {
 
                 } else if (option == "-v" || option == "--verbose") {
                     spdlog::set_level(spdlog::level::debug);
-                    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S] [%l] %v");
+                    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S] [%^%l%$] %v");
 
                     ++arg;
                     continue;
@@ -140,10 +140,10 @@ int main(int argc, char* argv[]) {
                 }
 
                 spdlog::info(
-                    "Have microbus interface with ABI version {}.{}, features{}", 
+                    "Have microbus interface with ABI version {}.{}, features{}",
                     info.versionMajor, info.versionMinor,
-                    std::string((info.features & MICROBUS_FEATURE_FLAG_I2C)   ? " I2C"  : "") + 
-                    std::string((info.features & MICROBUS_FEATURE_FLAG_OW)    ? " OW"   : "") + 
+                    std::string((info.features & MICROBUS_FEATURE_FLAG_I2C)   ? " I2C"  : "") +
+                    std::string((info.features & MICROBUS_FEATURE_FLAG_OW)    ? " OW"   : "") +
                     std::string((info.features & MICROBUS_FEATURE_FLAG_GPIO)  ? " GPIO" : "")
                 );
 

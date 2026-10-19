@@ -13,7 +13,7 @@ The project is currently **under active development**, and not all planned featu
 Microbus consists of two main components:
 
 - **Linux kernel module**
-  - Exposes embedded buses through the Linux device model (`/dev/i2c-X`, `/dev/spi`)
+  - Exposes embedded buses through the Linux device model (`/dev/i2c-X`, `/dev/spi`, `/sys/class/gpio`)
     - Creates custom `/dev/ow-X` devices for 1-Wire buses to enable raw communication with slave devices
   - [Compilation and Module Usage](kernel/README.md)
 - **Target firmware**
@@ -25,12 +25,13 @@ This architecture allows Linux applications to interact with embedded peripheral
 
 ---
 
-## Supported Protocols
+## Supported interfaces
 
 | Protocol | Status |
 |--------|--------|
 | I²C | ✅ Supported |
 | 1-Wire | ✅ Supported |
+| GPIO | ✅ Supported |
 | SPI | 🚧 Planned |
 
 ---
@@ -83,13 +84,13 @@ Please refer to:
 ```bash
 sudo i2cdetect -y 23
      0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-00:                         -- -- -- -- -- -- -- -- 
-10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-40: -- -- -- -- -- -- -- -- 48 -- -- -- -- -- -- -- 
-50: 50 51 -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+00:                         -- -- -- -- -- -- -- --
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+40: -- -- -- -- -- -- -- -- 48 -- -- -- -- -- -- --
+50: 50 51 -- -- -- -- -- -- -- -- -- -- -- -- -- --
+60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 70: -- -- -- -- -- -- -- --
 ```
 
@@ -147,14 +148,14 @@ sudo modprobe tsl2563
 sudo bash -c "echo tsl2561 0x39 > /sys/bus/i2c/devices/i2c-${I2C_DEV_NO}/new_device"
 
 # Read illuminance value (lux)
-cat /sys/bus/iio/devices/iio\:device0/in_illuminance0_input 
+cat /sys/bus/iio/devices/iio\:device0/in_illuminance0_input
 ```
 
 ## 1Wire
 ---
 ### Assumptions
   * Kernel modules
-    * ``wire`` module is loaded 
+    * ``wire`` module is loaded
         ```bash
         sudo modprobe wire
         ```
@@ -167,7 +168,27 @@ cat /sys/bus/iio/devices/iio\:device0/in_illuminance0_input
 ls  /sys/bus/w1/devices/
 
 28-112233445500  28-112233445501  28-112233445502  w1_bus_master1
-``` 
+```
+---
+## 'microbusctl' Control tool
+The microbusctl utility provides a simplified way to register I²C devices at runtime, including both basic I²C devices and more complex devices that require additional GPIO lines for control or interrupt notifications.
+
+This approach is similar to defining I²C and GPIO devices directly in the Device Tree Source (DTS), but allows devices to be registered dynamically without modifying the device tree.
+
+It is particularly useful for peripherals such as the NXP PN7150 NFC controller, which uses an enable (EN) GPIO to control the device and an interrupt (IRQ) GPIO to notify the host of events. An additional GPIO can be configured for firmware-related operations, if required by the device.
+
+### Example
+
+The following command registers a PN7150-compatible I²C device at address ``0x28``, using ``/dev/ttyUSB0`` as the control interface:
+
+```bash
+microbusctl -d /dev/ttyUSB0 i2c attach 0x28 nxp-nci_i2c enable=gpio:0 interrupt-source=gpio:1 firmware=gpio:3
+```
+
+The GPIO parameters specify the GPIO lines used for device enable, interrupt notification, and firmware control, respectively.
+
+For a complete list of supported commands, parameters, and configuration options, refer to the help documentation provided by ``microbusctl``.
+
 ---
 
 ## Project Status
