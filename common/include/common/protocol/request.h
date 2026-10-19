@@ -44,6 +44,38 @@ typedef struct _ProtoReqOwTransfer {
     } data;
 } ProtoReqOwTransfer;
 
+typedef struct _ProtoReqGpioControl {
+    uint8_t type;
+    uint8_t index;
+
+    union {
+        struct {
+            uint8_t hi;
+            uint8_t out;
+        } setDirection;
+
+        struct {
+            uint8_t hi;
+        } setValue;
+
+        struct {
+            uint8_t rising;
+            uint8_t falling;
+        } setIrqType;
+    } data;
+} ProtoReqGpioControl;
+
+typedef struct _ProtoReqEventReport {
+    uint8_t type;
+
+    union {
+        struct {
+            uint8_t rising;
+            uint8_t index;
+        } gpioIrq;
+    } data;
+} ProtoReqEventReport;
+
 typedef struct _ProtoReq {
     uint8_t cmd;
 
@@ -51,6 +83,8 @@ typedef struct _ProtoReq {
         ProtoReqGetInfo     getInfo;
         ProtoReqI2CTransfer i2cTransfer;
         ProtoReqOwTransfer  owTransfer;
+        ProtoReqGpioControl gpioControl;
+        ProtoReqEventReport eventReport;
     } request;
 } ProtoReq;
 

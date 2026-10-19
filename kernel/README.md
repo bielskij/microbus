@@ -39,7 +39,7 @@ The kernel module accepts the following parameters:
 
 * Configure UART TTY Parameters
 ```bash
-sudo stty -F $UART $BAUD cs8 -cstopb -parenb -crtscts -ixon -ixoff -echo -echoe -icanon -opost -isig -hup
+sudo stty -F $UART $BAUD cs8 -cstopb -parenb -crtscts -ixon -ixoff -echo -echoe -icanon -opost -isig -hupcl
 ```
 * Attach the ldisc to the UART
 ```bash

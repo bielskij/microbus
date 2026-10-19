@@ -5,9 +5,9 @@
 
 #include "common/protocol.h"
 #include "common/protocol/packet/decoder.h"
+#include "common/protocol/common.h"
 
-#include "../common.h"
-
+#define PROTO_PKT_DES_RET_SET_ERROR_CODE(_v)((_v) | 0x80)
 
 typedef enum _State {
 	STATE_WAIT_SYNC,
@@ -27,7 +27,7 @@ uint8_t proto_pkt_dec_putByte(ProtoPktDec *ctx, uint8_t byte, ProtoPkt *pkt) {
 		case STATE_WAIT_SYNC:
 			{
 				if ((byte & PROTO_SYNC_NIBBLE_MASK) == PROTO_SYNC_NIBBLE) {
-					pkt->code = PROTO_CMD_NIBBLE_MASK & byte;
+					pkt->code = byte & PROTO_CODE_MASK;
 
 					ctx->state = STATE_ID;
 				}
@@ -92,11 +92,11 @@ uint8_t proto_pkt_dec_putByte(ProtoPktDec *ctx, uint8_t byte, ProtoPkt *pkt) {
 
 				calculatedCrc = crc8_get(pkt->header,  pkt->headerUsed,  PROTO_CRC8_POLY, PROTO_CRC8_START);
 				calculatedCrc = crc8_get(pkt->payload, pkt->payloadUsed, PROTO_CRC8_POLY, calculatedCrc);
-				
+
 				if (calculatedCrc != pkt->footer[0]) {
 					error = PROTO_ERROR_INVALID_CRC;
 
-				} else {	
+				} else {
 					ctx->state = STATE_CMD_RDY;
 				}
 			}
@@ -129,7 +129,7 @@ uint8_t proto_pkt_dec_putByte(ProtoPktDec *ctx, uint8_t byte, ProtoPkt *pkt) {
 void proto_pkt_dec_reset(ProtoPktDec *ctx, ProtoPkt *pkt) {
 	ctx->state    = STATE_WAIT_SYNC;
 	ctx->dataRead = 0;
-	
+
 	if (pkt) {
 		proto_pkt_clear(pkt);
 	}

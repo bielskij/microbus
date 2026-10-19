@@ -25,6 +25,10 @@ typedef struct _ProtoResGetInfo {
     uint16_t packetSize;
 
     uint8_t features;
+
+    struct {
+        uint8_t count;
+    } gpio;
 } ProtoResGetInfo;
 
 typedef struct _ProtoResI2cTransfer {
@@ -56,6 +60,16 @@ typedef struct _ProtoResOwTransfer {
     } data;
 } ProtoResOwTransfer;
 
+typedef struct _ProtoResGpioControl {
+    uint8_t type;
+
+    union {
+        struct {
+            uint8_t hi;
+        } getValue;
+    } data;
+} ProtoResGpioControl;
+
 typedef struct _ProtoRes {
     uint8_t cmd;
 
@@ -63,6 +77,7 @@ typedef struct _ProtoRes {
         ProtoResGetInfo     getInfo;
         ProtoResI2cTransfer i2cTransfer;
         ProtoResOwTransfer  owTransfer;
+        ProtoResGpioControl gpioControl;
     } response;
 } ProtoRes;
 

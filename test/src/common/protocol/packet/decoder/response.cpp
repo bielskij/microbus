@@ -137,6 +137,16 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
         }
     },
 
+    ResponseDecoderTestData {
+        PROTO_CMD_RESET,
+        [](ProtoRes &res) {
+        },
+        [](ProtoRes &res) {
+        },
+        [](ProtoRes &res) {
+        }
+    },
+
     // Read 64 (NAK)
     ResponseDecoderTestData {
         PROTO_CMD_I2C_TRANSFER,
@@ -374,6 +384,27 @@ INSTANTIATE_TEST_SUITE_P(common_protocol, ResponseDecoderTestWithParameter, test
             ASSERT_EQ(t.type,   PROTO_OW_TRANSFER_TYPE_TOUCH_BIT);
 
             ASSERT_EQ(t.data.touchBit.value, 1);
+        }
+    },
+
+    ResponseDecoderTestData {
+        PROTO_CMD_GPIO_CONTROL,
+        [](ProtoRes &res) {
+            auto &t = res.response.gpioControl;
+
+            t.type = PROTO_GPIO_CONTROL_TYPE_GET_VALUE;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.gpioControl;
+
+            t.data.getValue.hi = true;
+        },
+        [](ProtoRes &res) {
+            auto &t = res.response.gpioControl;
+
+            ASSERT_EQ(t.type, PROTO_GPIO_CONTROL_TYPE_GET_VALUE);
+
+            ASSERT_EQ(t.data.getValue.hi, true);
         }
     }
 ));

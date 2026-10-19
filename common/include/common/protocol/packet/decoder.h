@@ -12,7 +12,6 @@ extern "C" {
 
 #define PROTO_PKT_DES_RET_IDLE 0
 #define PROTO_PKT_DES_RET_GET_ERROR_CODE(_v)((_v) & 0x7F)
-#define PROTO_PKT_DES_RET_SET_ERROR_CODE(_v)((_v) | 0x80)
 
 typedef struct _ProtoPktDesCtx {
 	uint8_t  state;

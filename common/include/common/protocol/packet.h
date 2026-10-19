@@ -34,6 +34,7 @@ bool proto_pkt_encode_header(ProtoPkt *pkt);
 bool proto_pkt_encode(ProtoPkt *pkt);
 
 uint16_t proto_pkt_size(ProtoPkt *pkt);
+bool     proto_pkt_copy(ProtoPkt *dst, ProtoPkt *src);
 
 #ifdef __cplusplus
 }

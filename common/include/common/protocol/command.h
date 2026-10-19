@@ -4,6 +4,9 @@
 #ifndef FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_
 #define FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_
 
+#define PROTO_VERSION_MAJOR 1
+#define PROTO_VERSION_MINOR 1
+
 /*
  * 1) CMD_GET_INFO.
  *
@@ -15,13 +18,20 @@
  *  - No payload
  *
  * Response payload:
- *  [    4b   ][    4b   ][   1/2B   ][   1B   ]
- *  [ VER_MAJ ][ VER_MIN ][ PLD_SIZE ][FEATURES]
+ *  [    4b   ][    4b   ][   1/2B   ][   1B   ][    1B    ]
+ *  [ VER_MAJ ][ VER_MIN ][ PLD_SIZE ][FEATURES][GPIO_COUNT]
  */
 #define PROTO_CMD_GET_INFO 0x0
 
-#define PROTO_FEATURE_I2C (1 << 0)
-#define PROTO_FEATURE_OW  (1 << 1)
+#define PROTO_FEATURE_I2C  (1 << 0)
+#define PROTO_FEATURE_OW   (1 << 1)
+#define PROTO_FEATURE_GPIO (1 << 2)
+
+/*
+ * 2) CMD_RESET
+ *
+ */
+#define PROTO_CMD_RESET 0x1
 
 /*
  * 2) CMD_I2C_TRANSFER
@@ -37,7 +47,7 @@
  * [  1B  ][... ]
  * [STATUS][DATA]
  */
-#define PROTO_CMD_I2C_TRANSFER 0x1
+#define PROTO_CMD_I2C_TRANSFER 0x2
 
 #define PROTO_I2C_TRANSFER_FLAG_START          (1 << 0)
 #define PROTO_I2C_TRANSFER_FLAG_REPEATED_START (1 << 1)
@@ -75,7 +85,7 @@
  * [  1B  ][... ]
  * [STATUS][DATA]
  */
-#define PROTO_CMD_OW_TRANSFER  0x2
+#define PROTO_CMD_OW_TRANSFER  0x3
 
 #define PROTO_OW_ROM_ID_SIZE 8
 
@@ -98,5 +108,50 @@
 #define PROTO_OW_STATUS_SEARCH_DONE_EMPTY  3
 #define PROTO_OW_STATUS_SEARCH_DONE_FOUND  4
 
+/*
+ * 4) PROTO_CMD_GPIO_CONTROL
+ *
+ * Request
+ * [ 4b ][ 4b  ]
+ * [TYPE][ IDX ]
+ *
+ * * SET_DIRECTION
+ * [ 6b ][ 1b  ][ 1b ]
+ * [ R  ][ OUT ][ HI ]
+ *
+ * * SET_VALUE
+ * [ 7b ][ 1b ]
+ * [ R  ][ HI ]
+ *
+ * Response
+ * * GET_VALUE
+ */
+
+#define PROTO_CMD_GPIO_CONTROL 0x4
+
+#define PROTO_GPIO_CONTROL_FLAG_HI  (1 << 0)
+#define PROTO_GPIO_CONTROL_FLAG_OUT (1 << 1)
+
+#define PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_RISING  (1 << 0)
+#define PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_FALLING (1 << 1)
+
+#define PROTO_GPIO_CONTROL_TYPE_UNKNOWN       (0)
+#define PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION (1)
+#define PROTO_GPIO_CONTROL_TYPE_SET_VALUE     (2)
+#define PROTO_GPIO_CONTROL_TYPE_GET_VALUE     (3)
+#define PROTO_GPIO_CONTROL_TYPE_IRQ_MASK      (4)
+#define PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK    (5)
+#define PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE  (6)
+
+/*
+ * 5) PROTO_CMD_EVENT_REPORT
+ *
+ */
+#define PROTO_CMD_EVENT_REPORT 0x5
+
+#define PROTO_EVENT_REPORT_TYPE_UNKNOWN  0x00
+#define PROTO_EVENT_REPORT_TYPE_GPIO_IRQ 0x01
+
+#define PROTO_EVENT_REPORT_GPIO_FLAG_RISING (1 << 0)
 
 #endif /* FIRMWARE_INCLUDE_PROTOCOL_COMMAND_H_ */

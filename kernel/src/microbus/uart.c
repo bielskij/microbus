@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // SPDX-FileCopyrightText: 2026 Jarosław Bielski <bielski.j@gmail.com>
 
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/w1.h>
+
+#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
+#include <linux/gpio/machine.h>
+
 #include <linux/tty.h>
 #include <linux/completion.h>
 #include <linux/wait.h>
@@ -91,8 +97,24 @@ typedef struct _UbusCmd {
     ProtoPkt responsePacket;
     ProtoRes response;
 
-    int errorCode;
+    int  errorCode;
+    bool autoDestroy;
 } UbusCmd;
+
+typedef struct _GpioMapping {
+    char name[MICROBUS_NAME_LEN];
+} GpioMapping;
+
+typedef struct _I2cDevice {
+    struct i2c_client         *client;
+    struct gpiod_lookup_table *gpioLookup;
+    char                       devId[MICROBUS_NAME_LEN];
+    struct i2c_board_info      info;
+    struct list_head           listItem;
+
+    GpioMapping gpioMappings[MICROBUS_MAX_RESOURCES];
+
+} I2cDevice;
 
 typedef struct _UbusUart {
     struct tty_struct *tty;
@@ -111,21 +133,33 @@ typedef struct _UbusUart {
     UbusCmd *pendingCmd;
     bool     hwDetected;
 
+    void    *tmpPacketBuffer;
+    size_t   tmpPacketBufferSize;
+    ProtoPkt tmpPacket;
+
+    MicrobusInformation information;
+
     struct i2c_adapter   i2cAdapter;
+    struct list_head     i2cDevices;
+    struct mutex         i2cDevicesLock;
+
     struct w1_bus_master w1Master;
     char                 w1MasterId[64];
     dev_t                w1MasterCharDev;
     struct cdev          w1MasterCharCdev;
     struct class        *w1MasterClass;
+
+    struct gpio_chip gpio;
 } UbusUart;
 
-static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
+static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode, bool autoDestroy) {
     INIT_LIST_HEAD(&cmd->list);
 
     init_completion(&cmd->workerCompletion);
     init_completion(&cmd->cmdCompletion);
 
-    cmd->id = (u8) atomic_inc_return(&ubus->nextCmdId);
+    cmd->autoDestroy = autoDestroy;
+    cmd->id          = (u8) atomic_inc_return(&ubus->nextCmdId);
 
     // Initialize request
     {
@@ -138,7 +172,7 @@ static UbusCmd *cmd_init(UbusUart *ubus, UbusCmd *cmd, uint8_t cmdCode) {
     return cmd;
 }
 
-static UbusCmd *cmd_alloc(UbusUart *ubus, uint8_t cmd) {
+static UbusCmd *cmd_alloc(UbusUart *ubus, uint8_t cmd, bool autoDestroy) {
     UbusCmd *ret = kzalloc(sizeof(*ret), GFP_KERNEL);
 
     if (ret) {
@@ -150,7 +184,7 @@ static UbusCmd *cmd_alloc(UbusUart *ubus, uint8_t cmd) {
         ret->responseBufferSize = ubus->packetSize;
         ret->responseBuffer     = kmalloc(ret->responseBufferSize, GFP_KERNEL);
 
-        ret = cmd_init(ubus, ret, cmd);
+        ret = cmd_init(ubus, ret, cmd, autoDestroy);
     }
 
     return ret;
@@ -168,19 +202,19 @@ static int cmd_prepare(UbusUart *ubus, UbusCmd *cmd) {
 
         } else {
             proto_req_assign(&cmd->request, cmd->requestPacket.payload, cmd->requestPacket.payloadSize);
+
+            cmd->requestPacket.payloadUsed = proto_req_encode(&cmd->request, cmd->requestPacket.payload, cmd->requestPacket.payloadSize);
         }
     }
 
     return ret;
 }
 
-static int cmd_enqueue(UbusUart *ubus, UbusCmd *cmd) {
+static int cmd_enqueue(UbusUart *ubus, UbusCmd *cmd, bool wait) {
     int ret = 0;
 
     {
         unsigned long flags;
-
-        cmd->requestPacket.payloadUsed = proto_req_encode(&cmd->request, cmd->requestPacket.payload, cmd->requestPacket.payloadSize);
 
         spin_lock_irqsave(&ubus->workerQueueLock, flags);
         {
@@ -189,6 +223,10 @@ static int cmd_enqueue(UbusUart *ubus, UbusCmd *cmd) {
         spin_unlock_irqrestore(&ubus->workerQueueLock, flags);
 
         wake_up(&ubus->wq);
+
+        if (wait) {
+            wait_for_completion(&cmd->cmdCompletion);
+        }
     }
 
     return ret;
@@ -214,10 +252,22 @@ static void cmd_free(UbusCmd **cmd) {
     }
 }
 
-static int cmd_wait(UbusCmd *cmd) {
-    wait_for_completion(&cmd->cmdCompletion);
+static void _prepareTmpPacket(UbusUart *ubus) {
+    if (
+        (ubus->tmpPacketBuffer == NULL) ||
+        (ubus->tmpPacketBufferSize != ubus->packetSize)
+    ) {
+        UBUS_LOG(("Resizing temporary packet buffer from %zd to %zd bytes", ubus->tmpPacketBufferSize, ubus->packetSize));
 
-    return 0;
+        if (ubus->tmpPacketBuffer) {
+            kfree(ubus->tmpPacketBuffer);
+        }
+
+        ubus->tmpPacketBufferSize = ubus->packetSize;
+        ubus->tmpPacketBuffer     = kmalloc(ubus->tmpPacketBufferSize, GFP_KERNEL);
+
+        proto_pkt_init(&ubus->tmpPacket, ubus->tmpPacketBuffer, ubus->tmpPacketBufferSize, 0, 0);
+    }
 }
 
 static void _w1SearchImpl(void *devData, struct w1_master *master, u8 searchType, w1_slave_found_callback callback) {
@@ -226,7 +276,7 @@ static void _w1SearchImpl(void *devData, struct w1_master *master, u8 searchType
     UBUS_TRACE(("[W1]: Search type: %02x", searchType));
 
     {
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
 
         ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
         ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
@@ -239,8 +289,7 @@ static void _w1SearchImpl(void *devData, struct w1_master *master, u8 searchType
         bool wasLast = false;
         do {
             cmd_prepare(ubus, cmd);
-            cmd_enqueue(ubus, cmd);
-            cmd_wait(cmd);
+            cmd_enqueue(ubus, cmd, true);
 
             UBUS_DBG(("[W1] Search step, status: %02x, rn: 0x%llx, descBit: %u, lastZero: %u, slaveCount: %d",
                 res->status, res->data.search.romId, res->data.search.descBit, res->data.search.lastZero, slaveCount
@@ -262,7 +311,7 @@ static void _w1SearchImpl(void *devData, struct w1_master *master, u8 searchType
             }
 
             if (! wasLast) {
-                cmd = cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+                cmd = cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER, false);
 
                 req->type = PROTO_OW_TRANSFER_TYPE_SEARCH_STEP;
 
@@ -306,15 +355,14 @@ static u8 _w1ResetBus(void *devData) {
         UBUS_TRACE(("[W1]: reseting bus"));
 
         {
-            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
             if (cmd) {
                 ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
 
                 t->type = PROTO_OW_TRANSFER_TYPE_RESET;
 
                 cmd_prepare(ubus, cmd);
-                cmd_enqueue(ubus, cmd);
-                cmd_wait(cmd);
+                cmd_enqueue(ubus, cmd, true);
 
                 {
                     int errorCode = cmd->errorCode;
@@ -354,7 +402,7 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
     UBUS_TRACE(("[W1]: Writing block of length %d", bufferLength));
 
     if (bufferLength > 0) {
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
         if (cmd != NULL) {
             int totalWritten = 0;
 
@@ -380,8 +428,7 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
                             memcpy(req->data.transfer.data, buffer + totalWritten, toSendDataSize);
                         }
 
-                        cmd_enqueue(ubus, cmd);
-                        cmd_wait(cmd);
+                        cmd_enqueue(ubus, cmd, true);
 
                         if (cmd->errorCode == 0) {
                             totalWritten += toSendDataSize;
@@ -392,7 +439,7 @@ static void _w1WriteBlock(void *devData, const u8 *buffer, int bufferLength) {
                     }
                 }
 
-                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER, cmd->autoDestroy);
             } while (totalWritten != bufferLength);
 
             cmd_free(&cmd);
@@ -408,7 +455,7 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
     if (bufferLength > 0) {
         UbusUart *ubus = (UbusUart *) devData;
 
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
         if (cmd != NULL) {
             do {
                 ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
@@ -429,8 +476,7 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
                     } else {
                         req->data.transfer.dataSize = toReadDataSize;
 
-                        cmd_enqueue(ubus, cmd);
-                        cmd_wait(cmd);
+                        cmd_enqueue(ubus, cmd, true);
 
                         if (cmd->errorCode == 0) {
                             uint16_t readSize = res->data.transfer.dataSize;
@@ -451,7 +497,7 @@ static u8 _w1ReadBlock(void *devData, u8 *buffer, int bufferLength) {
                     }
                 }
 
-                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER);
+                cmd_init(ubus, cmd, PROTO_CMD_OW_TRANSFER, cmd->autoDestroy);
             } while (totalRead != bufferLength);
 
             cmd_free(&cmd);
@@ -486,7 +532,7 @@ static u8 _w1TouchBit(void *devData, u8 bit) {
         UBUS_TRACE(("[W1]: touching bit %u", bit));
 
         {
-            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+            UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
             if (cmd) {
                 ProtoReqOwTransfer *t = &cmd->request.request.owTransfer;
 
@@ -495,8 +541,7 @@ static u8 _w1TouchBit(void *devData, u8 bit) {
                 t->data.touchBit.value = bit;
 
                 cmd_prepare(ubus, cmd);
-                cmd_enqueue(ubus, cmd);
-                cmd_wait(cmd);
+                cmd_enqueue(ubus, cmd, true);
 
                 {
                     int errorCode = cmd->errorCode;
@@ -534,7 +579,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
             size_t written = 0;
 
             do {
-                UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_I2C_TRANSFER);
+                UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_I2C_TRANSFER, false);
                 if (cmd) {
                     ProtoReqI2CTransfer *tx = &cmd->request.request.i2cTransfer;
 
@@ -600,8 +645,7 @@ static int _i2cXfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num) {
                         tx->dataSize
                     ));
 
-                    cmd_enqueue(ubus, cmd);
-                    cmd_wait(cmd);
+                    cmd_enqueue(ubus, cmd, true);
 
                     {
                         int errorCode = cmd->errorCode;
@@ -711,14 +755,14 @@ static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long 
         case MICROBUS_IOC_SEARCH_START:
         case MICROBUS_IOC_SEARCH_STEP:
             {
-                struct MicrobusSearchStep step;
+                MicrobusSearchStep step;
 
                 if (copy_from_user(&step, (void __user *) arg, sizeof(step))) {
                     return -EFAULT;
                 }
 
                 {
-                    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER);
+                    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_OW_TRANSFER, false);
 
                     ProtoReqOwTransfer *req = &cmd->request.request.owTransfer;
                     ProtoResOwTransfer *res = &cmd->response.response.owTransfer;
@@ -737,8 +781,7 @@ static long _w1DevIoctl(struct file *file, unsigned int ioctlCmd, unsigned long 
                     req->data.search.type = step.type;
 
                     cmd_prepare(ubus, cmd);
-                    cmd_enqueue(ubus, cmd);
-                    cmd_wait(cmd);
+                    cmd_enqueue(ubus, cmd, true);
 
                     if (res->status != PROTO_OW_STATUS_SEARCH_STEP) {
                         step.wasLast = true;
@@ -848,6 +891,241 @@ static const struct file_operations _ubusW1Fops = {
     .llseek         = noop_llseek
 };
 
+static int _gpioDevDirection(UbusUart *ubus, unsigned int offset, bool out, bool hi) {
+    int ret = 0;
+
+    {
+        UBUS_DBG(("CALL offset %u, out: %d, hi: %d", offset, out, hi));
+
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, false);
+        if (cmd) {
+            ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+            c->type  = PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION;
+            c->index = offset;
+
+            c->data.setDirection.out = out;
+            c->data.setDirection.hi  = hi;
+
+            cmd_prepare(ubus, cmd);
+            cmd_enqueue(ubus, cmd, true);
+
+            {
+                int errorCode = cmd->errorCode;
+
+                if (errorCode != 0) {
+                    ret = -EINVAL;
+                }
+            }
+
+            cmd_free(&cmd);
+        }
+    }
+
+    return ret;
+}
+
+static int _gpioDevDirectionInput(struct gpio_chip *gpio, unsigned int offset) {
+    UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
+
+    return _gpioDevDirection(ubus, offset, false, false);
+}
+
+static int _gpioDevDirectionOutput(struct gpio_chip *gpio, unsigned int offset, int value) {
+    UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
+
+    return _gpioDevDirection(ubus, offset, true, value ? true : false);
+}
+
+static int _gpioDevGet(struct gpio_chip *gpio, unsigned int offset) {
+    int ret = 0;
+
+    {
+        UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
+
+        UBUS_DBG(("CALL offset %u", offset));
+
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, false);
+        if (cmd) {
+            ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+            c->type  = PROTO_GPIO_CONTROL_TYPE_GET_VALUE;
+            c->index = offset;
+
+            cmd_prepare(ubus, cmd);
+            cmd_enqueue(ubus, cmd, true);
+
+            {
+                int errorCode = cmd->errorCode;
+
+                if (errorCode != 0) {
+                    ret = 0;
+
+                } else {
+                    ret = cmd->response.response.gpioControl.data.getValue.hi ? 1 : 0;
+                }
+            }
+
+            cmd_free(&cmd);
+        }
+    }
+
+    return ret;
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
+    #define GPIO_SET_RETURN int
+    #define GPIO_SET_RETURN_VALUE(x) return (x)
+#else
+    #define GPIO_SET_RETURN void
+    #define GPIO_SET_RETURN_VALUE(x)
+#endif
+
+static GPIO_SET_RETURN _gpioDevSet(struct gpio_chip *gpio, unsigned int offset, int value) {
+    int ret = 0;
+
+    {
+        UbusUart *ubus = (UbusUart *) gpiochip_get_data(gpio);
+
+        UBUS_DBG(("CALL offset %u, value: %d", offset, value));
+
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, false);
+        if (cmd) {
+            ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+            c->type  = PROTO_GPIO_CONTROL_TYPE_SET_VALUE;
+            c->index = offset;
+
+            c->data.setValue.hi = value ? 1 : 0;
+
+            cmd_prepare(ubus, cmd);
+            cmd_enqueue(ubus, cmd, true);
+
+            {
+                int errorCode = cmd->errorCode;
+
+                if (errorCode != 0) {
+                    UBUS_ERR(("Unable to set value %d on gpio-%u, error code = %d", value, offset, errorCode));
+
+                    ret = -EFAULT;
+                }
+            }
+
+            cmd_free(&cmd);
+        }
+    }
+
+    GPIO_SET_RETURN_VALUE(ret);
+}
+
+static void _gpioIrqMask(struct irq_data *data) {
+    UbusUart *ubus = (UbusUart *) gpiochip_get_data(
+        irq_data_get_irq_chip_data(data)
+    );
+
+    UBUS_DBG(("CALL %lu", data->hwirq));
+
+    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, true);
+    if (cmd) {
+        ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+        c->type  = PROTO_GPIO_CONTROL_TYPE_IRQ_MASK;
+        c->index = data->hwirq;
+
+        cmd_prepare(ubus, cmd);
+        cmd_enqueue(ubus, cmd, false);
+    }
+}
+
+static void _gpioIrqUnmask(struct irq_data *data) {
+    UbusUart *ubus = (UbusUart *) gpiochip_get_data(
+        irq_data_get_irq_chip_data(data)
+    );
+
+    UBUS_DBG(("CALL %lu", data->hwirq));
+
+    UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, true);
+    if (cmd) {
+        ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+        c->type  = PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK;
+        c->index = data->hwirq;
+
+        cmd_prepare(ubus, cmd);
+        cmd_enqueue(ubus, cmd, false);
+    }
+}
+
+static int _gpioIrqSetType(struct irq_data *data, unsigned int type) {
+    int ret = 0;
+
+    {
+        UbusUart *ubus = (UbusUart *) gpiochip_get_data(
+            irq_data_get_irq_chip_data(data)
+        );
+
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GPIO_CONTROL, true);
+        if (cmd == NULL) {
+            ret = -ENOMEM;
+
+        } else {
+            ProtoReqGpioControl *c = &cmd->request.request.gpioControl;
+
+            c->type  = PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE;
+            c->index = data->hwirq;
+
+            switch (type) {
+                case IRQ_TYPE_EDGE_FALLING:
+                    {
+                        UBUS_DBG(("IRQ_TYPE_EDGE_FALLING(%lu)", data->hwirq));
+
+                        c->data.setIrqType.falling = true;
+                    }
+                    break;
+
+                case IRQ_TYPE_EDGE_RISING:
+                    {
+                        UBUS_DBG(("IRQ_TYPE_EDGE_RISING(%lu)", data->hwirq));
+
+                        c->data.setIrqType.rising = true;
+                    }
+                    break;
+
+                case IRQ_TYPE_EDGE_BOTH:
+                    {
+                        UBUS_DBG(("IRQ_TYPE_EDGE_BOTH(%lu)", data->hwirq));
+
+                        c->data.setIrqType.rising  = true;
+                        c->data.setIrqType.falling = true;
+                    }
+                    break;
+
+                default:
+                    ret = -EINVAL;
+            }
+
+            if (ret == 0) {
+                cmd_prepare(ubus, cmd);
+                cmd_enqueue(ubus, cmd, false);
+            }
+        }
+    }
+
+    return ret;
+}
+
+static const struct irq_chip _gpioIrqChip = {
+    .name = "microbus-gpio-irq",
+
+    .irq_mask     = _gpioIrqMask,
+    .irq_unmask   = _gpioIrqUnmask,
+    .irq_set_type = _gpioIrqSetType,
+
+    .flags  = IRQCHIP_IMMUTABLE,
+
+    GPIOCHIP_IRQ_RESOURCE_HELPERS,
+};
+
 static void _sendPacket(UbusUart *ubus, ProtoPkt *pkt) {
     // TODO: Handle errors!
     ubus->tty->ops->write(ubus->tty, pkt->header,  pkt->headerUsed);
@@ -904,6 +1182,18 @@ static void _handleCmd(UbusUart *ubus, UbusCmd *cmd, bool force) {
     }
 
     complete(&cmd->cmdCompletion);
+
+    {
+        int errorCode = cmd->errorCode;
+
+        if (errorCode != 0) {
+            UBUS_ERR(("Non-waiting command %u returned an error %d", cmd->request.cmd, errorCode));
+        }
+    }
+
+    if (cmd->autoDestroy) {
+        cmd_free(&cmd);
+    }
 }
 
 static int _workerRoutine(void *arg) {
@@ -914,7 +1204,7 @@ static int _workerRoutine(void *arg) {
     ubus->hwDetected = false;
 
     {
-        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GET_INFO);
+        UbusCmd *cmd = cmd_alloc(ubus, PROTO_CMD_GET_INFO, false);
         if (cmd) {
             int ret = cmd_prepare(ubus, cmd);
             if (ret == 0) {
@@ -953,11 +1243,36 @@ static int _workerRoutine(void *arg) {
                             }
                         }
 
-                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c",
+                        UBUS_LOG(("Detected hardware with protocol %u.%u, payload size: %u, features: i2c: %c, 1w: %c, gpio: %c",
                             info->version.major, info->version.minor, info->packetSize,
-                            (info->features & PROTO_FEATURE_I2C) != 0 ? 'Y' : 'N',
-                            (info->features & PROTO_FEATURE_OW) != 0 ? 'Y' : 'N'
+                            (info->features & PROTO_FEATURE_I2C)  != 0 ? 'Y' : 'N',
+                            (info->features & PROTO_FEATURE_OW)   != 0 ? 'Y' : 'N',
+                            (info->features & PROTO_FEATURE_GPIO) != 0 ? 'Y' : 'N'
                         ));
+
+                        _prepareTmpPacket(ubus);
+
+                        if ((info->features & PROTO_FEATURE_GPIO) != 0) {
+                            UBUS_DBG(("Registering new gpio device in kernel"));
+
+                            struct gpio_chip *gpio = &ubus->gpio;
+
+                            gpio->ngpio = info->gpio.count;
+
+                            gpio_irq_chip_set_chip(&gpio->irq, &_gpioIrqChip);
+
+                            ret = gpiochip_add_data(gpio, ubus);
+                            if (! ret) {
+                                ubus->information.gpio.pinCount = gpio->ngpio;
+
+                                UBUS_LOG(("Created a new GPIO chip with %u pins", gpio->ngpio));
+
+                                ubus->information.features |= MICROBUS_FEATURE_FLAG_GPIO;
+
+                            } else {
+                                UBUS_ERR(("Cannot register gpio chip (%d)", ret));
+                            }
+                        }
 
                         if ((info->features & PROTO_FEATURE_I2C) != 0) {
                             UBUS_DBG(("Registering new i2c device in kernel"));
@@ -965,12 +1280,14 @@ static int _workerRoutine(void *arg) {
                             ret = i2c_add_adapter(&ubus->i2cAdapter);
                             if (ret == 0) {
                                 UBUS_LOG(("Created new i2c device i2c-%d", ubus->i2cAdapter.nr));
+
+                                ubus->information.features |= MICROBUS_FEATURE_FLAG_I2C;
                             }
                         }
 
-
-                        if ((info->features & PROTO_FEATURE_OW) != 0) {
-                            UBUS_DBG(("Reginstering new 1wire device in kernel"));
+                        // if ((info->features & PROTO_FEATURE_OW) != 0) {
+                        if (0) {
+                            UBUS_DBG(("Registering new 1wire device in kernel"));
 
                             ubus->w1Master.data = ubus;
 
@@ -1018,9 +1335,28 @@ static int _workerRoutine(void *arg) {
                                                 class_destroy(ubus->w1MasterClass);
                                                 cdev_del(&ubus->w1MasterCharCdev);
                                                 unregister_chrdev_region(ubus->w1MasterCharDev, 1);
+
+                                            } else {
+                                                ubus->information.features |= MICROBUS_FEATURE_FLAG_OW;
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        if (ret == 0) {
+                            cmd_init(ubus, cmd, PROTO_CMD_RESET, cmd->autoDestroy);
+
+                            ret = cmd_prepare(ubus, cmd);
+                            if (ret == 0) {
+                                _handleCmd(ubus, cmd, true);
+
+                                if (cmd->errorCode == 0) {
+                                    UBUS_LOG(("Hardware has been successfully reset"));
+
+                                } else {
+                                    // TODO: cleanup
                                 }
                             }
                         }
@@ -1068,7 +1404,6 @@ static int _workerRoutine(void *arg) {
                     list_del(&cmd->list);
                 }
             }
-
             spin_unlock_irqrestore(&ubus->workerQueueLock, flags);
         }
 
@@ -1094,67 +1429,129 @@ static size_t _ldiscReceive2(struct tty_struct *tty, const u8 *cp, const u8 *fp,
     {
         UbusUart *ubus = (UbusUart *) tty->disc_data;
 
-        unsigned long flags;
+        while (ret < count) {
+            ProtoPkt *pkt = &ubus->tmpPacket;
 
-        spin_lock_irqsave(&ubus->workerQueueLock, flags);
-        {
-            UbusCmd *cmd = ubus->pendingCmd;
-            if (! cmd) {
-                UBUS_ERR(("Received %zd bytes but there is no pending command - discarding %zd bytes", count, ret));
+            uint8_t decRet = proto_pkt_dec_putByte(&ubus->packetDecoder, cp[ret++], pkt);
+            if (decRet != PROTO_PKT_DES_RET_IDLE) {
+                uint8_t errorCode = PROTO_PKT_DES_RET_GET_ERROR_CODE(decRet);
 
-            } else {
-                while (ret < count) {
-                    ProtoPkt *pkt = &cmd->responsePacket;
+                if (errorCode != PROTO_NO_ERROR) {
+                    UBUS_ERR(("Received protocol error: %u", errorCode));
 
-                    uint8_t decRet = proto_pkt_dec_putByte(&ubus->packetDecoder, cp[ret++], pkt);
-                    if (decRet != PROTO_PKT_DES_RET_IDLE) {
-                        uint8_t errorCode = PROTO_PKT_DES_RET_GET_ERROR_CODE(decRet);
+                } else {
+                    if (PROTO_IS_RES(pkt->code)) {
+                        unsigned long flags;
 
-                        if (errorCode != PROTO_NO_ERROR) {
-                            UBUS_ERR(("Received protocol error: %u for command id: %u",
-                                errorCode, cmd->requestPacket.id
-                            ));
-
-                            cmd->errorCode = -EINVAL;
-
-                        } else {
-                            bool receivedExpectedResponse = false;
-
-                            if (pkt->id != cmd->requestPacket.id) {
-                                UBUS_WARN(("Received successful response for different ID (id %u != %u)", pkt->id, cmd->requestPacket.id));
+                        spin_lock_irqsave(&ubus->workerQueueLock, flags);
+                        {
+                            UbusCmd *cmd = ubus->pendingCmd;
+                            if (! cmd) {
+                                UBUS_ERR(("Received response packet but there is no pending command - discarding %zd bytes", ret));
 
                             } else {
-                                UBUS_DBG(("Received successful response for command %u, id: %u, payloadLength: %u/%u (read %zd of %zd)",
-                                    pkt->code, pkt->id, pkt->payloadUsed, pkt->payloadSize, ret, count
-                                ));
-
-                                // Decode response
-                                proto_res_init(&cmd->response, pkt->payload, pkt->payloadUsed, cmd->requestPacket.code);
-
-                                if (! proto_res_decode(&cmd->response, pkt->payload, pkt->payloadUsed)) {
-                                    UBUS_WARN(("Can't decode incoming command!"));
+                                if (pkt->id != cmd->requestPacket.id) {
+                                    UBUS_WARN(("Received response to command with different ID (id %u != %u)", pkt->id, cmd->requestPacket.id));
 
                                 } else {
-                                    proto_res_assign(&cmd->response, pkt->payload, pkt->payloadUsed);
+                                    UBUS_DBG(("Received successful response for command %u, id: %u, payloadLength: %u/%u (read %zd of %zd)",
+                                        pkt->code, pkt->id, pkt->payloadUsed, pkt->payloadSize, ret, count
+                                    ));
 
-                                    receivedExpectedResponse = true;
+                                    if (! proto_pkt_copy(&cmd->responsePacket, pkt)) {
+                                        UBUS_ERR(("Cant copy temporary packet to command context"));
+
+                                    } else {
+                                        pkt = &cmd->responsePacket;
+
+                                        // Decode response
+                                        proto_res_init(&cmd->response, pkt->payload, pkt->payloadUsed, cmd->requestPacket.code);
+
+                                        if (! proto_res_decode(&cmd->response, pkt->payload, pkt->payloadUsed)) {
+                                            UBUS_WARN(("Can't decode incoming command!"));
+
+                                        } else {
+                                            proto_res_assign(&cmd->response, pkt->payload, pkt->payloadUsed);
+
+                                            complete(&cmd->workerCompletion);
+                                        }
+                                    }
                                 }
                             }
+                        }
+                        spin_unlock_irqrestore(&ubus->workerQueueLock, flags);
 
-                            if (receivedExpectedResponse) {
-                                complete(&cmd->workerCompletion);
+                    } else {
+                        ProtoReq req;
+                        // bcma/driver_gpio.c
+                        // generic_handle_domain_irq_safe(ubus->gpio.irq.domain, 0);
+
+                        UBUS_DBG(("Received command %u from target", pkt->code));
+
+                        proto_req_init(&req, pkt->payload, pkt->payloadUsed, pkt->code);
+
+                        if (! proto_req_decode(&req, pkt->payload, pkt->payloadUsed)) {
+                            UBUS_WARN(("Can't decode incoming request"));
+
+                        } else {
+                            proto_req_assign(&req, pkt->payload, pkt->payloadUsed);
+
+                            switch (pkt->code) {
+                                case PROTO_CMD_EVENT_REPORT:
+                                    {
+                                        ProtoReqEventReport *e = (ProtoReqEventReport *) &req.request.eventReport;
+
+                                        switch (e->type) {
+                                            case PROTO_EVENT_REPORT_TYPE_GPIO_IRQ:
+                                                {
+                                                    UBUS_DBG(("Firing interrupt! pio: %u", e->data.gpioIrq.index));
+                                                    generic_handle_domain_irq_safe(ubus->gpio.irq.domain, e->data.gpioIrq.index);
+                                                }
+                                                break;
+
+                                            default:
+                                                UBUS_WARN(("Received not supported event type: %u", e->type));
+                                        }
+                                    }
+                                    break;
+
+                                default:
+                                    break;
                             }
                         }
-
-                        proto_pkt_dec_reset(&ubus->packetDecoder, NULL);
                     }
                 }
+
+                proto_pkt_dec_reset(&ubus->packetDecoder, &ubus->tmpPacket);
             }
         }
-        spin_unlock_irqrestore(&ubus->workerQueueLock, flags);
     }
 
     return ret;
+}
+
+static void _removeI2cDevice(UbusUart *ubus, I2cDevice *dev) {
+    if (dev) {
+        if (dev->client) {
+            UBUS_LOG(("Removing I2C device at address %#02x", dev->client->addr));
+
+            i2c_unregister_device(dev->client);
+
+            dev->client = NULL;
+        }
+
+        if (dev->gpioLookup) {
+            gpiod_remove_lookup_table(dev->gpioLookup);
+
+            kfree(dev->gpioLookup);
+
+            dev->gpioLookup = NULL;
+        }
+
+        list_del(&dev->listItem);
+
+        kfree(dev);
+    }
 }
 
 static void _ldiscCleanup(UbusUart **ubus) {
@@ -1165,7 +1562,25 @@ static void _ldiscCleanup(UbusUart **ubus) {
         return;
     }
 
-    i2c_del_adapter(&b->i2cAdapter);
+    {
+        mutex_lock(&b->i2cDevicesLock);
+        {
+            I2cDevice *dev;
+            I2cDevice *tmp;
+
+            list_for_each_entry_safe(dev, tmp, &b->i2cDevices, listItem) {
+                _removeI2cDevice(b, dev);
+            }
+        }
+        mutex_unlock(&b->i2cDevicesLock);
+
+        mutex_destroy(&b->i2cDevicesLock);
+    }
+
+    if (b->information.features & MICROBUS_FEATURE_FLAG_I2C) {
+        // TODO: Remove all attached devices
+        i2c_del_adapter(&b->i2cAdapter);
+    }
 
     if (b->w1Master.data != NULL) {
         w1_remove_master_device(&b->w1Master);
@@ -1174,6 +1589,10 @@ static void _ldiscCleanup(UbusUart **ubus) {
         class_destroy(b->w1MasterClass);
         cdev_del(&b->w1MasterCharCdev);
         unregister_chrdev_region(b->w1MasterCharDev, 1);
+    }
+
+    if (b->information.features & MICROBUS_FEATURE_FLAG_GPIO) {
+        gpiochip_remove(&b->gpio);
     }
 
     if (b->worker) {
@@ -1209,8 +1628,23 @@ static int _ldiscOpen(struct tty_struct *tty) {
         }
 
         if (ret == 0) {
+            {
+                MicrobusInformation *i = &ubus->information;
+
+                i->versionMajor = MICROBUS_ABI_VERSION_MAJOR;
+                i->versionMinor = MICROBUS_ABI_VERSION_MINOR;
+
+                i->features = 0;
+
+                i->i2c.reserved  = 0;
+                i->ow.reserved   = 0;
+                i->gpio.pinCount = 0;
+            }
+
             ubus->packetSize = DEFAULT_PACKET_SIZE;
             ubus->pendingCmd = NULL;
+
+            _prepareTmpPacket(ubus);
 
             INIT_LIST_HEAD(&ubus->workerQueue);
             spin_lock_init(&ubus->workerQueueLock);
@@ -1226,32 +1660,65 @@ static int _ldiscOpen(struct tty_struct *tty) {
         }
 
         if (ret == 0) {
-            ubus->i2cAdapter.owner     = THIS_MODULE;
-            ubus->i2cAdapter.class     = I2C_CLASS_HWMON;
-            ubus->i2cAdapter.retries   = 0;
+            struct i2c_adapter *adapter = &ubus->i2cAdapter;
 
-            ubus->i2cAdapter.algo_data = ubus;
-            ubus->i2cAdapter.algo      = &_ubusI2cAlgo;
+            adapter->owner     = THIS_MODULE;
+            adapter->class     = I2C_CLASS_HWMON;
+            adapter->retries   = 0;
 
-            strncpy(ubus->i2cAdapter.name, "microbus-i2c", sizeof(ubus->i2cAdapter.name));
+            adapter->algo_data = ubus;
+            adapter->algo      = &_ubusI2cAlgo;
+
+            strncpy(adapter->name, "microbus-i2c", sizeof(adapter->name));
+
+            INIT_LIST_HEAD(&ubus->i2cDevices);
+            mutex_init(&ubus->i2cDevicesLock);
         }
 
         if (ret == 0) {
+            struct w1_bus_master *master = &ubus->w1Master;
+
             strncpy(ubus->w1MasterId, "microbus-ow", sizeof(ubus->w1MasterId) - 1);
 
-            ubus->w1Master.read_byte   = _w1ReadByte;
-            ubus->w1Master.write_byte  = _w1WriteByte;
+            master->read_byte   = _w1ReadByte;
+            master->write_byte  = _w1WriteByte;
 
-            ubus->w1Master.read_block  = _w1ReadBlock;
-            ubus->w1Master.write_block = _w1WriteBlock;
+            master->read_block  = _w1ReadBlock;
+            master->write_block = _w1WriteBlock;
 
-            ubus->w1Master.touch_bit   = _w1TouchBit;
+            master->touch_bit   = _w1TouchBit;
 
-            ubus->w1Master.reset_bus   = _w1ResetBus;
-            ubus->w1Master.search      = _w1Search;
+            master->reset_bus   = _w1ResetBus;
+            master->search      = _w1Search;
 
-            ubus->w1Master.dev_id = ubus->w1MasterId;
-            ubus->w1Master.data   = NULL;
+            master->dev_id = ubus->w1MasterId;
+            master->data   = NULL;
+        }
+
+        if (ret == 0) {
+            struct gpio_chip *gpio = &ubus->gpio;
+
+            gpio->label  = "microbus-gpio";
+            gpio->owner  = THIS_MODULE;
+            gpio->parent = NULL;
+
+            gpio->base      = -1;
+            gpio->can_sleep = true;
+
+            gpio->direction_input  = _gpioDevDirectionInput;
+            gpio->direction_output = _gpioDevDirectionOutput;
+            gpio->get              = _gpioDevGet;
+            gpio->set              = _gpioDevSet;
+
+            {
+                struct gpio_irq_chip *girq = &gpio->irq;
+
+                girq->parent_handler = NULL;
+                girq->num_parents    = 0;
+                girq->parents        = NULL;
+                girq->default_type   = IRQ_TYPE_NONE;
+                girq->handler        = handle_simple_irq;
+            }
         }
 
         if (ret == 0) {
@@ -1275,6 +1742,217 @@ static void _ldiscClose(struct tty_struct *tty) {
     _ldiscCleanup((UbusUart **) &tty->disc_data);
 }
 
+static int _ldiscIoctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg) {
+    int ret = 0;
+
+    {
+        UbusUart *ubus = (UbusUart *) tty->disc_data;
+
+        switch (cmd) {
+            case MICROBUS_IOC_GET_INFORMATION:
+                {
+                    UBUS_DBG(("_ldiscIoctl(): MICROBUS_IOC_GET_INFORMATION"));
+
+                    if (copy_to_user((void *) arg, &ubus->information, sizeof(ubus->information))) {
+                        ret = -EFAULT;
+                    }
+                }
+                break;
+
+            case MICROBUS_IOC_I2C_ATTACH:
+                {
+                    MicrobusI2cAttachParameters params;
+
+                    UBUS_DBG(("_ldiscIoctl(): MICROBUS_IOC_I2C_ATTACH"));
+
+                    if (copy_from_user(&params, (void *) arg, sizeof(params))) {
+                        UBUS_ERR(("Unable to copy parameters from user"));
+
+                        ret = -EFAULT;
+
+                    } else if (! (ubus->information.features & MICROBUS_FEATURE_FLAG_I2C)) {
+                        UBUS_WARN(("I2C interface is not supported by the connected Microbus connector"));
+
+                        ret = -ENOTSUPP;
+
+                    } else {
+                        I2cDevice *dev = NULL;
+
+                        mutex_lock(&ubus->i2cDevicesLock);
+                        {
+                            I2cDevice *it = NULL;
+
+                            list_for_each_entry(it, &ubus->i2cDevices, listItem) {
+                                if (it->info.addr == params.address) {
+                                    dev = it;
+                                    break;
+                                }
+                            }
+
+                            if (dev != NULL) {
+                                UBUS_WARN(("I2C device at address %#02x is already registered", params.address));
+
+                                dev = NULL;
+                                ret = -EEXIST;
+
+                            } else {
+                                dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+
+                                INIT_LIST_HEAD(&dev->listItem);
+
+                                list_add_tail(&dev->listItem, &ubus->i2cDevices);
+                            }
+                        }
+                        mutex_unlock(&ubus->i2cDevicesLock);
+
+                        if (ret == 0) {
+                            int irq = 0;
+
+                            if (params.resourceCount > 0) {
+                                __u16 gpioCount = 0;
+
+                                for (__u16 i = 0; i < params.resourceCount; i++) {
+                                    MicrobusResource *res = &params.resources[i];
+
+                                    if (strncmp(res->name, "interrupt-source", MICROBUS_NAME_LEN) == 0) {
+                                        if (res->interface == MICROBUS_INTERFACE_GPIO) {
+                                            if (! (ubus->information.features & MICROBUS_FEATURE_FLAG_GPIO)) {
+                                                UBUS_WARN(("GPIO interface is not supported by the connected Microbus connector"));
+
+                                            } else {
+                                                struct gpio_desc *desc = gpio_device_get_desc(ubus->gpio.gpiodev, res->index);
+                                                if (desc) {
+                                                    irq = gpiod_to_irq(desc);
+
+                                                } else {
+                                                    UBUS_WARN(("Cannot get GPIO description for offset %u", res->index));
+                                                }
+                                            }
+
+                                        } else {
+                                            UBUS_WARN(("Not supported interface: %u", res->interface));
+
+                                            continue;
+                                        }
+
+                                    } else {
+                                        gpioCount++;
+                                    }
+                                }
+
+                                if (gpioCount == 0) {
+                                    dev->gpioLookup = NULL;
+
+                                } else {
+                                    if (! (ubus->information.features & MICROBUS_FEATURE_FLAG_GPIO)) {
+                                        UBUS_WARN(("Requested attachment of %u GPIO pins, but GPIO is not supported by the connected Microbus connector", gpioCount));
+
+                                    } else {
+                                        dev->gpioLookup = kzalloc(struct_size(dev->gpioLookup, table, gpioCount + 1), GFP_KERNEL);
+
+                                        snprintf(dev->devId, MICROBUS_NAME_LEN, "%u-%04x", ubus->i2cAdapter.nr, params.address);
+
+                                        dev->gpioLookup->dev_id = dev->devId;
+
+                                        gpioCount = 0;
+                                        for (__u16 i = 0; i < params.resourceCount; i++) {
+                                            MicrobusResource *res = &params.resources[i];
+
+                                            if (
+                                                (strncmp(res->name, "interrupt-source", MICROBUS_NAME_LEN) != 0) &&
+                                                res->interface == MICROBUS_INTERFACE_GPIO
+                                            ) {
+                                                GpioMapping *m = &dev->gpioMappings[gpioCount];
+
+                                                strncpy(m->name, res->name, MICROBUS_NAME_LEN);
+
+                                                dev->gpioLookup->table[gpioCount++] = GPIO_LOOKUP(ubus->gpio.label, res->index, m->name, GPIO_ACTIVE_HIGH);
+
+                                                UBUS_DBG(("Adding gpio lookup for pin %u, name '%s', device '%s'", res->index, m->name, dev->devId));
+                                            }
+                                        }
+
+                                        gpiod_add_lookup_table(dev->gpioLookup);
+                                    }
+                                }
+                            }
+
+                            // Fill board info
+                            strncpy(dev->info.type, params.driver, I2C_NAME_SIZE);
+
+                            dev->info.addr = params.address;
+                            dev->info.irq  = irq;
+
+                            dev->client = i2c_new_client_device(&ubus->i2cAdapter, &dev->info);
+                            if (dev->client) {
+                                UBUS_LOG(("Registered new I2C device at address %#02x for driver '%s', resources: %u, parent IRQ: %d",
+                                    params.address, params.driver, params.resourceCount, irq
+                                ));
+
+                                mutex_lock(&ubus->i2cDevicesLock);
+                                {
+
+                                }
+                                mutex_unlock(&ubus->i2cDevicesLock);
+
+                            } else {
+                                ret = -EFAULT;
+                            }
+                        }
+
+                        if (ret != 0) {
+                           _removeI2cDevice(ubus, dev);
+                        }
+                    }
+                }
+                break;
+
+            case MICROBUS_IOC_I2C_DETACH:
+                {
+                    MicrobusI2cDetachParameters params;
+
+                    UBUS_DBG(("_ldiscIoctl(): MICROBUS_IOC_I2C_DETACH"));
+
+                    if (copy_from_user(&params, (void *) arg, sizeof(params))) {
+                        UBUS_ERR(("Unable to copy parameters from user"));
+
+                        ret = -EFAULT;
+
+                    } else {
+                        bool removed = false;
+
+                        mutex_lock(&ubus->i2cDevicesLock);
+                        {
+                            I2cDevice *dev;
+                            I2cDevice *tmp;
+
+                            list_for_each_entry_safe(dev, tmp, &ubus->i2cDevices, listItem) {
+                                if (dev->info.addr == params.address) {
+                                    _removeI2cDevice(ubus, dev);
+
+                                    removed = true;
+                                }
+                            }
+                        }
+                        mutex_unlock(&ubus->i2cDevicesLock);
+
+                        if (! removed) {
+                            UBUS_WARN(("I2C device at address %#02x was not found", params.address));
+
+                            ret = -ENODEV;
+                        }
+                    }
+                }
+                break;
+
+            default:
+                ret = -ENOTTY;
+        }
+    }
+
+    return ret;
+}
+
 static struct tty_ldisc_ops _ldiscOps = {
     .owner = THIS_MODULE,
     .name  = "Microbus over UART line discipline",
@@ -1282,7 +1960,8 @@ static struct tty_ldisc_ops _ldiscOps = {
 
     .open         = _ldiscOpen,
     .close        = _ldiscClose,
-    .receive_buf2 = _ldiscReceive2
+    .receive_buf2 = _ldiscReceive2,
+    .ioctl        = _ldiscIoctl
 };
 
 static int __init _ubus_uart_init(void) {

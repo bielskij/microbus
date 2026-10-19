@@ -10,6 +10,8 @@
 	#define NULL ((void *) 0)
 #endif
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
+
 #define CONCAT_MACRO(port, letter) port ## letter
 #define DECLARE_PORT(port) CONCAT_MACRO(PORT, port)
 #define DECLARE_DDR(port)  CONCAT_MACRO(DDR,  port)

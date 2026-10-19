@@ -4,9 +4,7 @@
 #include "common/protocol.h"
 #include "common/protocol/command.h"
 #include "common/protocol/request.h"
-
-#include "common.h"
-
+#include "common/protocol/common.h"
 
 #define PTR_U8(x) ((uint8_t *)(x))
 
@@ -41,6 +39,24 @@ void proto_req_init(ProtoReq *request, void *memory, uint16_t memorySize, uint8_
 
                 t->data.transfer.dataSize = memorySize - 1;
             }
+            break;
+
+        case PROTO_CMD_GPIO_CONTROL:
+            {
+                ProtoReqGpioControl *t = &request->request.gpioControl;
+
+                t->type  = PROTO_GPIO_CONTROL_TYPE_UNKNOWN;
+                t->index = 0;
+            }
+            break;
+
+        case PROTO_CMD_EVENT_REPORT:
+            {
+                ProtoReqEventReport *t = &request->request.eventReport;
+
+                t->type = PROTO_EVENT_REPORT_TYPE_UNKNOWN;
+            }
+            break;
 
         default:
             break;
@@ -110,11 +126,6 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
 
     if (memory) {
         switch (request->cmd) {
-            case PROTO_CMD_GET_INFO:
-                {
-                }
-                break;
-
             case PROTO_CMD_I2C_TRANSFER:
                 {
                     ProtoReqI2CTransfer *t = &request->request.i2cTransfer;
@@ -191,6 +202,88 @@ uint16_t proto_req_encode(ProtoReq *request, void *memory, uint16_t memorySize) 
                 }
                 break;
 
+            case PROTO_CMD_GPIO_CONTROL:
+                {
+                    ProtoReqGpioControl *c = &request->request.gpioControl;
+
+                    PTR_U8(memory)[ret++] = ((c->type << 4) & 0xf0) | (c->index & 0x0f);
+
+                    switch (c->type) {
+                        case PROTO_GPIO_CONTROL_TYPE_GET_VALUE:
+                            break;
+
+                        case PROTO_GPIO_CONTROL_TYPE_SET_VALUE:
+                            {
+                                if (c->data.setValue.hi) {
+                                    PTR_U8(memory)[ret++] = PROTO_GPIO_CONTROL_FLAG_HI;
+
+                                } else {
+                                    PTR_U8(memory)[ret++] = 0;
+                                }
+                            }
+                            break;
+
+                        case PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION:
+                            {
+                                uint8_t val = 0;
+
+                                if (c->data.setDirection.hi) {
+                                    val |= PROTO_GPIO_CONTROL_FLAG_HI;
+                                }
+
+                                if (c->data.setDirection.out) {
+                                    val |= PROTO_GPIO_CONTROL_FLAG_OUT;
+                                }
+
+                                PTR_U8(memory)[ret++] = val;
+                            }
+                            break;
+
+                        case PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE:
+                            {
+                                uint8_t val = 0;
+
+                                if (c->data.setIrqType.rising) {
+                                    val |= PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_RISING;
+                                }
+
+                                if (c->data.setIrqType.falling) {
+                                    val |= PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_FALLING;
+                                }
+
+                                PTR_U8(memory)[ret++] = val;
+                            }
+                            break;
+                    }
+                }
+                break;
+
+            case PROTO_CMD_EVENT_REPORT:
+                {
+                    ProtoReqEventReport *c = &request->request.eventReport;
+
+                    PTR_U8(memory)[ret++] = (c->type << 4) & 0xf0;
+
+                    switch (c->type) {
+                        case PROTO_EVENT_REPORT_TYPE_UNKNOWN:
+                            break;
+
+                        case PROTO_EVENT_REPORT_TYPE_GPIO_IRQ:
+                            {
+                                PTR_U8(memory)[ret - 1] |= (c->data.gpioIrq.index & 0x0f);
+
+                                if (c->data.gpioIrq.rising) {
+                                    PTR_U8(memory)[ret++] = PROTO_EVENT_REPORT_GPIO_FLAG_RISING;
+
+                                } else {
+                                    PTR_U8(memory)[ret++] = 0;
+                                }
+                            }
+                            break;
+                    }
+                }
+                break;
+
             default:
                 break;
         }
@@ -207,6 +300,9 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
 
         switch (request->cmd) {
             case PROTO_CMD_GET_INFO:
+                break;
+
+            case PROTO_CMD_RESET:
                 break;
 
             case PROTO_CMD_I2C_TRANSFER:
@@ -347,6 +443,100 @@ bool proto_req_decode(ProtoReq *request, void *memory, uint16_t memorySize) {
                                     memorySize--;
                                 }
                                 break;
+                        }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_GPIO_CONTROL:
+                {
+                    ProtoReqGpioControl *t = &request->request.gpioControl;
+
+                    if (ret) {
+                        ret = memorySize > 0;
+                        if (ret) {
+                            t->type  = (*memoryP) >> 4;
+                            t->index = (*memoryP) & 0x0f;
+
+                            memoryP++;
+                            memorySize--;
+                        }
+                    }
+
+                    if (ret) {
+                        switch (t->type) {
+                            case PROTO_GPIO_CONTROL_TYPE_SET_VALUE:
+                                {
+                                    ret = memorySize > 0;
+                                    if (ret) {
+                                        t->data.setValue.hi = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_HI) != 0;
+
+                                        memoryP++;
+                                        memorySize--;
+                                    }
+                                }
+                                break;
+
+                            case PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION:
+                                {
+                                    ret = memorySize > 0;
+                                    if (ret) {
+                                        t->data.setDirection.hi  = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_HI)  != 0;
+                                        t->data.setDirection.out = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_OUT) != 0;
+
+                                        memoryP++;
+                                        memorySize--;
+                                    }
+                                }
+                                break;
+
+                            case PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE:
+                                {
+                                    ret = memorySize > 0;
+                                    if (ret) {
+                                        t->data.setIrqType.rising  = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_RISING)  != 0;
+                                        t->data.setIrqType.falling = (memoryP[0] & PROTO_GPIO_CONTROL_FLAG_IRQ_TYPE_FALLING) != 0;
+
+                                        memoryP++;
+                                        memorySize--;
+                                    }
+                                }
+                                break;
+                        }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_EVENT_REPORT:
+                {
+                    ProtoReqEventReport *c = &request->request.eventReport;
+
+                    if (ret) {
+                        ret = memorySize > 0;
+                        if (ret) {
+                            c->type  = memoryP[0] >> 4;
+
+                            switch (c->type) {
+                                case PROTO_EVENT_REPORT_TYPE_GPIO_IRQ:
+                                    {
+                                        c->data.gpioIrq.index = memoryP[0] & 0x0f;
+
+                                        memoryP++;
+                                        memorySize--;
+
+                                        ret = memorySize > 0;
+                                        if (ret) {
+                                            c->data.gpioIrq.rising = (memoryP[0] & PROTO_EVENT_REPORT_GPIO_FLAG_RISING) != 0;
+
+                                            memoryP++;
+                                            memorySize--;
+                                        }
+                                    }
+                                    break;
+
+                                default:
+                                    break;
+                            }
                         }
                     }
                 }

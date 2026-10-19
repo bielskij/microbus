@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.28)
 
 set(DEFAULT_AVR_UPLOADTOOL_PORT     /dev/ttyUSB0)
 set(DEFAULT_AVR_UPLOADTOOL_BAUDRATE 57600)
@@ -58,7 +58,7 @@ if(AVR_UPLOADTOOL_BAUDRATE)
 	set(BURN_SCRIPT_BASE_OPTIONS ${BURN_SCRIPT_BASE_OPTIONS} -b ${AVR_UPLOADTOOL_BAUDRATE})
 endif()
 
-set(AVR_SIZE_ARGS -C;--mcu=${AVR_MCU})
+set(AVR_SIZE_ARGS --format=avr;--mcu=${AVR_MCU})
 
 set(EXECUTABLE_NAME firmware)
 

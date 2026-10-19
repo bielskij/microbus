@@ -4,9 +4,7 @@
 #include "common/protocol.h"
 #include "common/protocol/command.h"
 #include "common/protocol/response.h"
-
-#include "common.h"
-
+#include "common/protocol/common.h"
 
 #define PTR_U8(x) ((uint8_t *)(x))
 
@@ -23,6 +21,8 @@ void proto_res_init(ProtoRes *response, void *memory, uint16_t memorySize, uint8
 
                 info->packetSize = 0;
                 info->features   = 0;
+
+                info->gpio.count = 0;
             }
             break;
 
@@ -50,6 +50,14 @@ void proto_res_init(ProtoRes *response, void *memory, uint16_t memorySize, uint8
 
                 t->status = PROTO_OW_STATUS_OK;
                 t->type   = PROTO_OW_TRANSFER_TYPE_UNKNOWN;
+            }
+            break;
+
+        case PROTO_CMD_GPIO_CONTROL:
+            {
+                ProtoResGpioControl *c = &response->response.gpioControl;
+
+                c->type = PROTO_GPIO_CONTROL_TYPE_UNKNOWN;
             }
             break;
 
@@ -94,6 +102,9 @@ void proto_res_assign(ProtoRes *response, void *memory, uint16_t memorySize) {
             }
             break;
 
+        case PROTO_CMD_GPIO_CONTROL:
+            break;
+
         default:
             break;
     }
@@ -113,6 +124,10 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                     ret += proto_int_val_encode(info->packetSize, PTR_U8(memory) + ret);
 
                     PTR_U8(memory)[ret++] = info->features;
+
+                    if ((info->features & PROTO_FEATURE_GPIO) != 0) {
+                        PTR_U8(memory)[ret++] = info->gpio.count;
+                    }
                 }
                 break;
 
@@ -173,6 +188,27 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
                 }
                 break;
 
+            case PROTO_CMD_GPIO_CONTROL:
+                {
+                    ProtoResGpioControl *c = &response->response.gpioControl;
+
+                    PTR_U8(memory)[ret] = ((c->type << 4) & 0xf0);
+
+                    switch (c->type) {
+                        case PROTO_GPIO_CONTROL_TYPE_GET_VALUE:
+                            if (c->data.getValue.hi) {
+                                PTR_U8(memory)[ret] |= PROTO_GPIO_CONTROL_FLAG_HI;
+                            }
+                            break;
+
+                        default:
+                            break;
+                    }
+
+                    ret++;
+                }
+                break;
+
             default:
                 break;
         }
@@ -182,25 +218,26 @@ uint16_t proto_res_encode(ProtoRes *response, void *memory, uint16_t memorySize)
 }
 
 bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
-    bool ret = memory != NULL && memorySize;
+    bool ret = true;
 
-    if (ret) {
+    {
         uint8_t *memoryP = PTR_U8(memory);
 
         switch (response->cmd) {
+            case PROTO_CMD_RESET:
+                break;
+
             case PROTO_CMD_GET_INFO:
                 {
                     ProtoResGetInfo *info = &response->response.getInfo;
 
+                    ret = memory != NULL && memorySize;
                     if (ret) {
-                        ret = memorySize != 0;
-                        if (ret) {
-                            info->version.major = (*memoryP) >> 4;
-                            info->version.minor = (*memoryP) & 0x0f;
+                        info->version.major = (*memoryP) >> 4;
+                        info->version.minor = (*memoryP) & 0x0f;
 
-                            memoryP++;
-                            memorySize--;
-                        }
+                        memoryP++;
+                        memorySize--;
                     }
 
                     if (ret) {
@@ -227,6 +264,18 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                             memorySize--;
                         }
                     }
+
+                    if (ret) {
+                        if ((info->features & PROTO_FEATURE_GPIO) != 0) {
+                            ret = memorySize != 0;
+                            if (ret) {
+                                info->gpio.count = *memoryP;
+
+                                memoryP++;
+                                memorySize--;
+                            }
+                        }
+                    }
                 }
                 break;
 
@@ -237,7 +286,7 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                     t->rxBuffer     = NULL;
                     t->rxBufferSize = 0;
 
-                    ret = memorySize != 0;
+                    ret = memory != NULL && memorySize;
                     if (ret) {
                         t->status = *memoryP;
 
@@ -258,7 +307,7 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                 {
                     ProtoResOwTransfer *t = &response->response.owTransfer;
 
-                    ret = memorySize != 0;
+                    ret = memory != NULL && memorySize;
                     if (ret) {
                         t->status = *memoryP >> 4;
                         t->type   = *memoryP & 0x0f;
@@ -309,6 +358,24 @@ bool proto_res_decode(ProtoRes *response, void *memory, uint16_t memorySize) {
                                 }
                             }
                         }
+                    }
+                }
+                break;
+
+            case PROTO_CMD_GPIO_CONTROL:
+                {
+                    ProtoResGpioControl *c = &response->response.gpioControl;
+
+                    ret = memory != NULL && memorySize;
+                    if (ret) {
+                        c->type = *memoryP >> 4;;
+
+                        if (c->type == PROTO_GPIO_CONTROL_TYPE_GET_VALUE) {
+                            c->data.getValue.hi = (*memoryP & PROTO_GPIO_CONTROL_FLAG_HI) != 0;
+                        }
+
+                        memoryP++;
+                        memorySize--;
                     }
                 }
                 break;

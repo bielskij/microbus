@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.28)
 project(protocol)
 
 set(headers_path "${CMAKE_CURRENT_LIST_DIR}/include/")
@@ -6,6 +6,7 @@ set(headers
 	${headers_path}/common/crc8.h
 	${headers_path}/common/protocol.h
 	${headers_path}/common/protocol/packet.h
+	${headers_path}/common/protocol/common.h
 	${headers_path}/common/protocol/packet/decoder.h
 	${headers_path}/common/protocol/request.h
 	${headers_path}/common/protocol/response.h
@@ -21,7 +22,7 @@ set(srcs
 	${src_path}/crc8.c
 )
 
-add_library(protocol 
+add_library(protocol
 	${headers} ${srcs}
 )
 

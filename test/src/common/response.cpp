@@ -25,6 +25,7 @@ TEST(common_protocol, response_get_info) {
             response.response.getInfo.packetSize    = 16 * 1024;
             response.response.getInfo.version.major = 10;
             response.response.getInfo.version.minor = 12;
+            response.response.getInfo.gpio.count    = 4;
 
             bufferWritten = proto_res_encode(&response, buffer, sizeof(buffer));
 
@@ -43,6 +44,46 @@ TEST(common_protocol, response_get_info) {
             ASSERT_EQ(decoded.response.getInfo.packetSize,    response.response.getInfo.packetSize);
             ASSERT_EQ(decoded.response.getInfo.version.major, response.response.getInfo.version.major);
             ASSERT_EQ(decoded.response.getInfo.version.minor, response.response.getInfo.version.minor);
+
+            ASSERT_EQ(decoded.response.getInfo.gpio.count, 0);
+        }
+    }
+
+    // GPIO
+    {
+        ProtoRes response;
+
+        {
+            proto_res_init(&response, buffer, sizeof(buffer), PROTO_CMD_GET_INFO);
+
+            ASSERT_EQ(response.cmd, PROTO_CMD_GET_INFO);
+
+            proto_res_assign(&response, buffer, sizeof(buffer));
+
+            response.response.getInfo.features      = PROTO_FEATURE_I2C | PROTO_FEATURE_GPIO;
+            response.response.getInfo.packetSize    = 16 * 1024;
+            response.response.getInfo.version.major = 10;
+            response.response.getInfo.version.minor = 12;
+            response.response.getInfo.gpio.count    = 4;
+
+            bufferWritten = proto_res_encode(&response, buffer, sizeof(buffer));
+
+            ASSERT_EQ(bufferWritten, 5);
+        }
+
+        {
+            ProtoRes decoded;
+
+            proto_res_init(&decoded, nullptr, 0, response.cmd);
+            proto_res_assign(&decoded, buffer, bufferWritten);
+
+            ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
+
+            ASSERT_EQ(decoded.response.getInfo.features,      response.response.getInfo.features);
+            ASSERT_EQ(decoded.response.getInfo.packetSize,    response.response.getInfo.packetSize);
+            ASSERT_EQ(decoded.response.getInfo.version.major, response.response.getInfo.version.major);
+            ASSERT_EQ(decoded.response.getInfo.version.minor, response.response.getInfo.version.minor);
+            ASSERT_EQ(decoded.response.getInfo.gpio.count,    response.response.getInfo.gpio.count);
         }
     }
 }
@@ -315,6 +356,46 @@ TEST(common_protocol, response_ow_transfer) {
                 ASSERT_EQ(decoded.response.owTransfer.type,   response.response.owTransfer.type);
 
                 ASSERT_EQ(decoded.response.owTransfer.data.touchBit.value, response.response.owTransfer.data.touchBit.value);
+            }
+        }
+    }
+}
+
+TEST(common_protocol, response_gpio_control) {
+    uint8_t buffer[64];
+
+    uint16_t bufferWritten;
+
+    {
+        ProtoRes response;
+
+        {
+            proto_res_init(&response, buffer, sizeof(buffer), PROTO_CMD_GPIO_CONTROL);
+
+            ASSERT_EQ(response.cmd,                       PROTO_CMD_GPIO_CONTROL);
+            ASSERT_EQ(response.response.gpioControl.type, PROTO_OW_TRANSFER_TYPE_UNKNOWN);
+
+            response.response.gpioControl.type = PROTO_GPIO_CONTROL_TYPE_GET_VALUE;
+            response.response.gpioControl.data.getValue.hi = true;
+
+            proto_res_assign(&response, buffer, sizeof(buffer));
+
+            bufferWritten = proto_res_encode(&response, buffer, sizeof(buffer));
+            ASSERT_EQ(bufferWritten, 1);
+
+            {
+                ProtoRes decoded;
+
+                proto_res_init(&decoded, nullptr, 0, response.cmd);
+
+                decoded.response.gpioControl.type = response.response.gpioControl.type;
+
+                proto_res_assign(&decoded, buffer, bufferWritten);
+
+                ASSERT_TRUE(proto_res_decode(&decoded, buffer, bufferWritten));
+
+                ASSERT_EQ(decoded.response.gpioControl.type,             response.response.gpioControl.type);
+                ASSERT_EQ(decoded.response.gpioControl.data.getValue.hi, response.response.gpioControl.data.getValue.hi);
             }
         }
     }

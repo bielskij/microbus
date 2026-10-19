@@ -43,6 +43,11 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
                 break;
             }
 
+            if (! PROTO_IS_CMD(pkt->code)) {
+                _sendError(hub, PROTO_ERROR_NOT_SUPPORTED);
+                break;
+            }
+
             // Parse, assign request to coming packet
             proto_req_init(&request, pkt->payload, pkt->payloadUsed, pkt->code);
 
@@ -72,6 +77,9 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
                     }
                     break;
 
+                case PROTO_CMD_RESET:
+                    break;
+
                 case PROTO_CMD_I2C_TRANSFER:
                     {
                         ProtoResI2cTransfer *res = &response.response.i2cTransfer;
@@ -99,6 +107,14 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
                     }
                     break;
 
+                case PROTO_CMD_GPIO_CONTROL:
+                    {
+                        ProtoResGpioControl *c = &response.response.gpioControl;
+
+                        c->type = request.request.gpioControl.type;
+                    }
+                    break;
+
                 default:
                     _sendError(hub, PROTO_ERROR_INVALID_CMD);
                     break;
@@ -116,6 +132,8 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
 
         } while (0);
 
+        pkt->code |= PROTO_RES_FLAG;
+
         proto_pkt_encode(pkt);
 
         hub->responseCallback(pkt->header,  pkt->headerUsed,  hub->callbackData);
@@ -124,6 +142,28 @@ void ubus_hub_putByte(UbusHub *hub, uint8_t byte) {
 
         proto_pkt_dec_reset(&hub->packetDeserializer, &hub->packet);
     }
+}
+
+void ubus_hub_reportEvent(UbusHub *hub, UbusHubEventCallback callback, void *callbackData) {
+    uint8_t  packetBuffer[16]; // TODO: determine the required size automatically
+    ProtoPkt packet;
+    ProtoReq request;
+
+    proto_pkt_init(&packet, packetBuffer, sizeof(packetBuffer), PROTO_CMD_EVENT_REPORT, 0);
+
+    proto_req_init(&request, packet.payload, packet.payloadUsed, packet.code);
+
+    callback(&request.request.eventReport, callbackData);
+
+    proto_req_assign(&request, packet.payload, packet.payloadSize);
+
+    packet.payloadUsed = proto_req_encode(&request, packet.payload, packet.payloadSize);
+
+    proto_pkt_encode(&packet);
+
+    hub->responseCallback(packet.header,  packet.headerUsed,  hub->callbackData);
+    hub->responseCallback(packet.payload, packet.payloadUsed, hub->callbackData);
+    hub->responseCallback(packet.footer,  packet.footerUsed,  hub->callbackData);
 }
 
 void ubus_hub_reset(UbusHub *hub) {

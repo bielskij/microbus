@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR GPL-2.0-only
 // SPDX-FileCopyrightText: 2026 Jarosław Bielski <bielski.j@gmail.com>
 
-#include "common.h"
+#include "common/protocol/common.h"
 
 uint8_t proto_int_val_length_estimate(uint16_t val) {
 	if (val > 127) {

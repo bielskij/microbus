@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <termios.h>
 
 #include <string>
 
@@ -74,11 +75,20 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
     auto *ctx = reinterpret_cast<Context *>(callbackData);
 
     switch (request->cmd) {
+        case PROTO_CMD_RESET:
+            {
+                DBG(("PROTO_CMD_RESET"));
+            }
+            break;
+
         case PROTO_CMD_GET_INFO:
             {
                 DBG(("PROTO_CMD_GET_INFO"));
 
-                response->response.getInfo.features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW;
+                // response->response.getInfo.features = PROTO_FEATURE_I2C | PROTO_FEATURE_OW | PROTO_FEATURE_GPIO;
+                response->response.getInfo.features = PROTO_FEATURE_I2C | PROTO_FEATURE_GPIO;
+
+                response->response.getInfo.gpio.count = 4;
             }
             break;
 
@@ -232,6 +242,61 @@ static void _ubusHubRequestCallback(ProtoReq *request, ProtoRes *response, void 
             }
             break;
 
+        case PROTO_CMD_GPIO_CONTROL:
+            {
+                auto &req = request->request.gpioControl;
+                auto &res = response->response.gpioControl;
+
+                switch (req.type) {
+                    case PROTO_GPIO_CONTROL_TYPE_GET_VALUE:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_GET_VALUE, pin {}]", req.index));
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_DIRECTION, pin {}, out: {}, hi: {}]",
+                                req.index, req.data.setDirection.out, req.data.setDirection.hi
+                            ));
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_SET_VALUE:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_VALUE, pin {}, hi: {}]",
+                                req.index, req.data.setValue.hi
+                            ));
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_IRQ_MASK:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_IRQ_MASK, pin {}]",
+                                req.index
+                            ));
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_IRQ_UNMASK, pin {}]",
+                                req.index
+                            ));
+                        }
+                        break;
+
+                    case PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE:
+                        {
+                            DBG(("PROTO_CMD_GPIO_CONTROL [PROTO_GPIO_CONTROL_TYPE_SET_IRQ_TYPE, pin {}, falling: {}, rising: {}]",
+                                req.index, req.data.setIrqType.falling, req.data.setIrqType.rising
+                            ));
+                        }
+                        break;
+                }
+            }
+            break;
+
         default:
             {
                 DBG(("Unknown command %d", request->cmd));
@@ -254,6 +319,20 @@ static void _intHandler(int signo) {
     interrupted = true;
 }
 
+typedef struct _FillReportCallbackData {
+    bool    rising;
+    uint8_t index;
+} FillReportCallbackData;
+
+static void _fillReportCallback(ProtoReqEventReport *event, void *callbackData) {
+    FillReportCallbackData *data = (FillReportCallbackData *) callbackData;
+
+    event->type = PROTO_EVENT_REPORT_TYPE_GPIO_IRQ;
+
+    event->data.gpioIrq.index  = data->index;
+    event->data.gpioIrq.rising = data->rising;
+}
+
 int main(int argc, char *argv[]) {
     spdlog::set_level(spdlog::level::debug);
 
@@ -268,6 +347,8 @@ int main(int argc, char *argv[]) {
         _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445501ULL, 22.1234));
         _owSlaves.emplace_back(std::make_shared<Ds1820>(true, 0x0000112233445502ULL, 12.1256));
     }
+
+    termios oldTermios;
 
     do {
         ctx.ptyMasterFd = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);
@@ -301,6 +382,29 @@ int main(int argc, char *argv[]) {
             break;
         }
 
+        // make stdin nonblocking
+        {
+            int flags = ::fcntl(STDIN_FILENO, F_GETFL, 0);
+            if (flags == -1) {
+
+            } else {
+                if (::fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == -1) {
+                    // error
+                }
+            }
+        }
+
+        {
+            termios newTermios;
+
+            ::tcgetattr(STDIN_FILENO, &oldTermios);
+
+            newTermios = oldTermios;
+            newTermios.c_lflag &= ~(ICANON | ECHO);
+
+            ::tcsetattr(STDIN_FILENO, TCSANOW, &newTermios);
+        }
+
         ubus_hub_setup(&ctx.hub, packetBuffer, packetSize, _ubusHubRequestCallback, _ubusHubResponseCallback, &ctx);
 
         while (! interrupted) {
@@ -313,8 +417,11 @@ int main(int argc, char *argv[]) {
 
             FD_ZERO(&readSet);
             FD_SET(ctx.ptyMasterFd, &readSet);
+            FD_SET(STDIN_FILENO,    &readSet);
 
-            int selectRet = ::select(ctx.ptyMasterFd + 1, &readSet, NULL, NULL, &timeout);
+            int maxFd = std::max(STDIN_FILENO, ctx.ptyMasterFd);
+
+            int selectRet = ::select(maxFd + 1, &readSet, NULL, NULL, &timeout);
             if (selectRet < 0) {
                 if (errno != EINTR) {
                     ERR(("Select returned an error: {}", std::strerror(errno)));
@@ -331,11 +438,35 @@ int main(int argc, char *argv[]) {
                 } else {
                     ubus_hub_reset(&ctx.hub);
                 }
+
+                if (FD_ISSET(STDIN_FILENO, &readSet)) {
+                    uint8_t byte;
+
+                    while (read(STDIN_FILENO, &byte, 1) == 1) {
+                        switch (byte) {
+                            case '1':
+                            case '2':
+                            case '3':
+                            case '4':
+                                {
+                                    FillReportCallbackData data;
+
+                                    data.index  = byte - '1';
+                                    data.rising = true;
+
+                                    ubus_hub_reportEvent(&ctx.hub, _fillReportCallback, &data);
+                                }
+                                break;
+                        }
+                    }
+                }
             }
         }
 
         DBG(("Main loop terminated"));
     } while (0);
+
+    ::tcsetattr(STDIN_FILENO, TCSANOW, &oldTermios);
 
     if (ctx.ptyMasterFd >= 0) {
         close(ctx.ptyMasterFd);
